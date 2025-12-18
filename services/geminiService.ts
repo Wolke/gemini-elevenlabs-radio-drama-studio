@@ -45,6 +45,7 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
     - The 'text' (dialogue) field MUST be in the SAME LANGUAGE as the input story. 
     - If the story is in Traditional Chinese, the dialogue and character names must be in Traditional Chinese.
     - If the story is in English, the dialogue must be in English.
+    - **CRITICAL**: The 'expression' field MUST ALWAYS be in ENGLISH, regardless of the story language.
     
     1. **Cast**: Identify all characters. Assign one of the following voices to each character based on their personality and the voice description:
        - 'Zephyr' (Bright)
@@ -82,7 +83,7 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
        - For 'speech':
          - 'character': Name from the cast list.
          - 'text': The dialogue (IN THE STORY'S LANGUAGE).
-         - 'expression': A direction for HOW it should be spoken. Be specific and varied (e.g., "whispering", "shouting angrily", "laughing", "sobbing", "sarcastic", "robotic", "gaspless", "terrified", "warmly", "coldly"). USE A WIDE VARIETY of at least 30 different emotional styles throughout the script if appropriate.
+         - 'expression': A direction for HOW it should be spoken. MUST BE IN ENGLISH (e.g., "whispering", "shouting angrily", "laughing", "sobbing", "sarcastic", "robotic", "gaspless", "terrified", "warmly", "coldly"). USE A WIDE VARIETY of at least 30 different emotional styles throughout the script if appropriate.
        ${sfxInstructions}
 
     Return a JSON object with keys "cast" and "script".

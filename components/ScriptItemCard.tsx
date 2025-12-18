@@ -1,6 +1,6 @@
 import React from 'react';
 import { ItemType, ScriptItem } from '../types';
-import { Play, Square, Mic, Music, Trash2, ArrowUp, ArrowDown, Search, Loader2, Link as LinkIcon, Volume2, MessageSquare, RotateCw, Wand2 } from 'lucide-react';
+import { Play, Square, Mic, Music, Trash2, ArrowUp, ArrowDown, Search, Loader2, Link as LinkIcon, Volume2, MessageSquare, RotateCw, Wand2, AlertCircle } from 'lucide-react';
 
 interface ScriptItemCardProps {
   item: ScriptItem;
@@ -125,44 +125,52 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
               rows={2}
             />
             
-            <div className="flex items-center gap-2 justify-end">
-               
-               {item.audioBuffer && (
-                  <button
-                    onClick={() => onPreviewAudio(item.audioBuffer!)}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/30 transition-colors"
-                  >
-                    <Play size={14} fill="currentColor" />
-                    Play Audio
-                  </button>
-               )}
+            <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                   {item.audioBuffer && (
+                      <button
+                        onClick={() => onPreviewAudio(item.audioBuffer!)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/30 transition-colors"
+                      >
+                        <Play size={14} fill="currentColor" />
+                        Play Audio
+                      </button>
+                   )}
 
-               <button 
-                onClick={() => onGenerateAudio(item.id, item.text || '', currentVoice, item.expression || '')}
-                disabled={item.isLoadingAudio || !item.text}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  item.audioBuffer 
-                  ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200' 
-                  : 'bg-zinc-100 text-zinc-900 hover:bg-white'
-                }`}
-               >
-                 {item.isLoadingAudio ? (
-                   <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Generating...
-                   </>
-                 ) : item.audioBuffer ? (
-                   <>
-                    <RotateCw size={14} />
-                    Regenerate
-                   </>
-                 ) : (
-                   <>
-                    <Volume2 size={14} />
-                    Generate Audio
-                   </>
-                 )}
-               </button>
+                   <button 
+                    onClick={() => onGenerateAudio(item.id, item.text || '', currentVoice, item.expression || '')}
+                    disabled={item.isLoadingAudio || !item.text}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      item.audioBuffer 
+                      ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200' 
+                      : 'bg-zinc-100 text-zinc-900 hover:bg-white'
+                    }`}
+                   >
+                     {item.isLoadingAudio ? (
+                       <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Generating...
+                       </>
+                     ) : item.audioBuffer ? (
+                       <>
+                        <RotateCw size={14} />
+                        Regenerate
+                       </>
+                     ) : (
+                       <>
+                        <Volume2 size={14} />
+                        Generate Audio
+                       </>
+                     )}
+                   </button>
+                </div>
+
+                {item.generationError && (
+                  <div className="flex items-start gap-2 p-2 bg-red-900/30 border border-red-800/50 rounded-lg text-xs text-red-200 w-full">
+                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                    <span>{item.generationError}</span>
+                  </div>
+                )}
             </div>
           </div>
         ) : (
@@ -193,33 +201,24 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
                         )}
                      </div>
                      
-                     <button
-                       onClick={() => onGenerateSfx(item.id, item.sfxDescription || 'sound')}
-                       disabled={item.isLoadingAudio || !item.sfxDescription}
-                       className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-md text-xs font-medium transition-colors disabled:opacity-50"
-                     >
-                       {item.isLoadingAudio ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-                       {item.audioBuffer ? 'Regenerate SFX' : 'Generate SFX (ElevenLabs)'}
-                     </button>
+                     <div className="flex flex-col items-end gap-2">
+                         <button
+                           onClick={() => onGenerateSfx(item.id, item.sfxDescription || 'sound')}
+                           disabled={item.isLoadingAudio || !item.sfxDescription}
+                           className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+                         >
+                           {item.isLoadingAudio ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                           {item.audioBuffer ? 'Regenerate SFX' : 'Generate SFX (ElevenLabs)'}
+                         </button>
+                         
+                         {item.generationError && (
+                           <div className="flex items-start gap-2 p-2 bg-red-900/30 border border-red-800/50 rounded-lg text-xs text-red-200">
+                             <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                             <span>{item.generationError}</span>
+                           </div>
+                         )}
+                     </div>
                   </div>
-                  
-                  {/* Fallback option to still use YouTube if generation fails or they prefer it */}
-                  <details className="text-xs text-zinc-500">
-                    <summary className="cursor-pointer hover:text-zinc-300">Advanced: Use YouTube Backup</summary>
-                    <div className="mt-2 pl-2 border-l border-zinc-800 space-y-2">
-                       <input 
-                          type="text" 
-                          placeholder="YouTube ID"
-                          value={item.youtubeId || ''}
-                          onChange={handleYoutubeChange}
-                          className="w-full bg-zinc-950/50 border border-zinc-700 rounded px-2 py-1 text-xs"
-                       />
-                       <div className="flex gap-2">
-                          <input type="number" placeholder="Start" value={item.youtubeStartTime} onChange={e => onUpdate(item.id, {youtubeStartTime: Number(e.target.value)})} className="w-1/2 bg-zinc-950/50 border border-zinc-700 rounded px-2 py-1 text-xs" />
-                          <input type="number" placeholder="Duration" value={item.youtubeDuration} onChange={e => onUpdate(item.id, {youtubeDuration: Number(e.target.value)})} className="w-1/2 bg-zinc-950/50 border border-zinc-700 rounded px-2 py-1 text-xs" />
-                       </div>
-                    </div>
-                  </details>
                </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

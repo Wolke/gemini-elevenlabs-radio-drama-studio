@@ -81,7 +81,8 @@ export default function App() {
   };
 
   const handleGenerateAudio = async (id: string, text: string, voice: string, expression: string) => {
-    handleUpdateItem(id, { isLoadingAudio: true });
+    // Reset error state and set loading
+    handleUpdateItem(id, { isLoadingAudio: true, generationError: undefined });
     
     try {
       const ctx = getAudioContext();
@@ -93,18 +94,23 @@ export default function App() {
         buffer = await decodeAudioFile(base64, ctx);
       } else {
         // Use Gemini
+        // We explicitly pass the parameters here, which come from the component's current props
         const base64 = await generateSpeech(text, voice, expression);
         buffer = await decodeRawPCM(base64, ctx);
       }
       
       handleUpdateItem(id, { 
         audioBuffer: buffer, 
-        isLoadingAudio: false 
+        isLoadingAudio: false,
+        generationError: undefined
       });
     } catch (e: any) {
       console.error(e);
-      handleUpdateItem(id, { isLoadingAudio: false });
-      alert(`Failed to generate audio: ${e.message}`);
+      // Store the specific error message on the item so the user can see it
+      handleUpdateItem(id, { 
+        isLoadingAudio: false,
+        generationError: e.message || "Unknown error occurred"
+      });
     }
   };
 
@@ -114,7 +120,7 @@ export default function App() {
       return;
     }
     
-    handleUpdateItem(id, { isLoadingAudio: true });
+    handleUpdateItem(id, { isLoadingAudio: true, generationError: undefined });
 
     try {
       const base64 = await generateElevenLabsSfx(description, 4, state.elevenLabsApiKey);
@@ -124,13 +130,16 @@ export default function App() {
       handleUpdateItem(id, { 
         audioBuffer: buffer, 
         isLoadingAudio: false,
+        generationError: undefined,
         // Clear Youtube settings if we successfully generated an audio file
         youtubeId: undefined
       });
     } catch (e: any) {
       console.error(e);
-      handleUpdateItem(id, { isLoadingAudio: false });
-      alert(`Failed to generate SFX: ${e.message}`);
+      handleUpdateItem(id, { 
+        isLoadingAudio: false,
+        generationError: e.message || "Failed to generate SFX"
+      });
     }
   };
 

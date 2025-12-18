@@ -69,10 +69,13 @@ export const Player: React.FC<PlayerProps> = ({ items, isPlaying, onPlayStateCha
         playItem(index + 1);
       }
     } else if (item.type === ItemType.SFX) {
-      if (item.youtubeId) {
+      // Check for generated audio buffer FIRST, then YouTube, then timeout
+      if (item.audioBuffer) {
+        playAudioBuffer(item.audioBuffer, () => playItem(index + 1));
+      } else if (item.youtubeId) {
         playYoutubeSfx(item.youtubeId, item.youtubeStartTime || 0, item.youtubeDuration || 5, () => playItem(index + 1));
       } else {
-        // Wait default duration if no ID
+        // Wait default duration if no ID or Audio
         timeoutRef.current = window.setTimeout(() => playItem(index + 1), 2000);
       }
     }

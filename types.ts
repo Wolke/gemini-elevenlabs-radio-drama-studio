@@ -21,6 +21,7 @@ export interface ScriptItem {
   // Audio state
   audioBuffer?: AudioBuffer | null;
   isLoadingAudio?: boolean;
+  generationError?: string; // Capture API errors here
   
   // YouTube SFX state
   youtubeId?: string;

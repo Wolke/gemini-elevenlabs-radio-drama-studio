@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { DramaState, ItemType, ScriptItem, CastMember } from './types';
 import { generateScriptFromStory, generateSpeech } from './services/geminiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech } from './services/elevenLabsService';
-import { decodeRawPCM, decodeAudioFile, getAudioContext } from './utils/audioUtils';
+import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download } from 'lucide-react';
 
 const VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
@@ -31,6 +31,7 @@ export default function App() {
 
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerateScript = async () => {
@@ -171,6 +172,38 @@ export default function App() {
     setIsGeneratingAll(false);
   };
 
+  const handleExportAudio = async () => {
+    const buffersToMerge = state.items
+      .map(item => item.audioBuffer)
+      .filter((b): b is AudioBuffer => !!b);
+
+    if (buffersToMerge.length === 0) {
+      alert("No generated audio found to export.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const mergedBuffer = await mergeAudioBuffers(buffersToMerge);
+      const wavBlob = bufferToWav(mergedBuffer);
+      
+      // Trigger download
+      const url = URL.createObjectURL(wavBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gemini-drama-${Date.now()}.wav`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export audio.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handlePreviewAudio = (buffer: AudioBuffer) => {
     const ctx = getAudioContext();
     const source = ctx.createBufferSource();
@@ -202,17 +235,29 @@ export default function App() {
           
           <div className="flex items-center gap-4">
              {state.items.length > 0 && (
-                <button
-                  onClick={handlePlayToggle}
-                  className={`flex items-center gap-2 px-6 py-2 rounded-full font-medium transition-all ${
-                    state.isPlaying 
-                      ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/50' 
-                      : 'bg-zinc-100 text-zinc-950 hover:bg-white border border-transparent'
-                  }`}
-                >
-                  {state.isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
-                  {state.isPlaying ? 'Stop Broadcast' : 'Play Drama'}
-                </button>
+                <>
+                  <button
+                    onClick={handleExportAudio}
+                    disabled={isExporting}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors text-sm border border-zinc-700"
+                    title="Export merged audio"
+                  >
+                    {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                    <span className="hidden sm:inline">Export WAV</span>
+                  </button>
+
+                  <button
+                    onClick={handlePlayToggle}
+                    className={`flex items-center gap-2 px-6 py-2 rounded-full font-medium transition-all ${
+                      state.isPlaying 
+                        ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/50' 
+                        : 'bg-zinc-100 text-zinc-950 hover:bg-white border border-transparent'
+                    }`}
+                  >
+                    {state.isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+                    {state.isPlaying ? 'Stop Broadcast' : 'Play Drama'}
+                  </button>
+                </>
              )}
           </div>
         </div>

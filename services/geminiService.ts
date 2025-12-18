@@ -41,6 +41,11 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
     You are an expert radio drama scriptwriter and director. 
     Convert the following story into a detailed radio drama script with a cast list and a sequence of cues.
     
+    **LANGUAGE INSTRUCTION**: 
+    - The 'text' (dialogue) field MUST be in the SAME LANGUAGE as the input story. 
+    - If the story is in Traditional Chinese, the dialogue and character names must be in Traditional Chinese.
+    - If the story is in English, the dialogue must be in English.
+    
     1. **Cast**: Identify all characters. Assign one of the following voices to each character based on their personality and the voice description:
        - 'Zephyr' (Bright)
        - 'Puck' (Upbeat)
@@ -76,7 +81,7 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
     2. **Script**: A list of cues.
        - For 'speech':
          - 'character': Name from the cast list.
-         - 'text': The dialogue.
+         - 'text': The dialogue (IN THE STORY'S LANGUAGE).
          - 'expression': A direction for HOW it should be spoken. Be specific and varied (e.g., "whispering", "shouting angrily", "laughing", "sobbing", "sarcastic", "robotic", "gaspless", "terrified", "warmly", "coldly"). USE A WIDE VARIETY of at least 30 different emotional styles throughout the script if appropriate.
        ${sfxInstructions}
 

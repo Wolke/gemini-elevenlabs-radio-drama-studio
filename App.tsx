@@ -5,7 +5,7 @@ import { generateElevenLabsSfx, generateElevenLabsSpeech } from './services/elev
 import { decodeRawPCM, decodeAudioFile, getAudioContext } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp } from 'lucide-react';
 
 const VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
@@ -24,11 +24,12 @@ export default function App() {
     isGeneratingScript: false,
     isPlaying: false,
     currentPlayingId: null,
-    enableSfx: true,
+    enableSfx: false,
     elevenLabsApiKey: '',
     useElevenLabsForSpeech: false,
   });
 
+  const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +42,7 @@ export default function App() {
     try {
       const { cast, items } = await generateScriptFromStory(state.storyText, state.enableSfx);
       setState(prev => ({ ...prev, cast, items, isGeneratingScript: false }));
+      setIsConfigExpanded(false); // Collapse config after successful generation
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
       setState(prev => ({ ...prev, isGeneratingScript: false }));
@@ -210,58 +212,66 @@ export default function App() {
       <main className="max-w-5xl mx-auto px-6 pt-24 pb-20 space-y-12">
 
         {/* Configuration Section */}
-        <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5 space-y-4">
-           <div className="flex items-center gap-2 text-zinc-400 mb-2">
-              <Settings2 size={18} />
-              <h3 className="font-semibold text-sm uppercase tracking-wider">Configuration</h3>
+        <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden transition-all">
+           <div 
+             className="flex items-center justify-between p-5 cursor-pointer bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
+             onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+           >
+             <div className="flex items-center gap-2 text-zinc-400">
+                <Settings2 size={18} />
+                <h3 className="font-semibold text-sm uppercase tracking-wider">Configuration</h3>
+             </div>
+             {isConfigExpanded ? <ChevronUp size={16} className="text-zinc-500" /> : <ChevronDown size={16} className="text-zinc-500" />}
            </div>
            
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* SFX Toggle */}
-              <div className="flex flex-col gap-2">
-                 <div className="flex items-center justify-between">
-                    <span className="text-zinc-300 text-sm">Include Sound Effects (SFX)</span>
-                    <button 
-                      onClick={() => setState(prev => ({...prev, enableSfx: !prev.enableSfx}))}
-                      className={`text-2xl transition-colors ${state.enableSfx ? 'text-indigo-400' : 'text-zinc-600'}`}
-                    >
-                      {state.enableSfx ? <ToggleRight /> : <ToggleLeft />}
-                    </button>
-                 </div>
-                 <p className="text-xs text-zinc-500">If enabled, the AI will add sound effect cues to the script.</p>
-              </div>
+           {isConfigExpanded && (
+             <div className="p-5 pt-0 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-zinc-800/50 mt-2">
+                {/* SFX Toggle */}
+                <div className="flex flex-col gap-2 pt-4">
+                   <div className="flex items-center justify-between">
+                      <span className="text-zinc-300 text-sm">Include Sound Effects (SFX)</span>
+                      <button 
+                        onClick={() => setState(prev => ({...prev, enableSfx: !prev.enableSfx}))}
+                        className={`text-2xl transition-colors ${state.enableSfx ? 'text-indigo-400' : 'text-zinc-600'}`}
+                      >
+                        {state.enableSfx ? <ToggleRight /> : <ToggleLeft />}
+                      </button>
+                   </div>
+                   <p className="text-xs text-zinc-500">If enabled, the AI will add sound effect cues to the script.</p>
+                </div>
 
-              {/* ElevenLabs Settings */}
-              {state.enableSfx && (
-                 <div className="flex flex-col gap-3 border-l border-zinc-800 pl-6">
-                    <div className="space-y-1">
-                       <label className="text-xs font-bold text-zinc-500 uppercase flex items-center gap-1">
-                          <Key size={12} />
-                          ElevenLabs API Key
-                       </label>
-                       <input 
-                         type="password" 
-                         value={state.elevenLabsApiKey}
-                         onChange={(e) => setState(prev => ({...prev, elevenLabsApiKey: e.target.value}))}
-                         placeholder="sk_..."
-                         className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:border-indigo-500/50 focus:outline-none"
-                       />
-                    </div>
-
-                    {state.elevenLabsApiKey && (
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-zinc-300 text-sm">Use ElevenLabs for Voice?</span>
-                        <button 
-                          onClick={() => setState(prev => ({...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech}))}
-                          className={`text-2xl transition-colors ${state.useElevenLabsForSpeech ? 'text-indigo-400' : 'text-zinc-600'}`}
-                        >
-                          {state.useElevenLabsForSpeech ? <ToggleRight /> : <ToggleLeft />}
-                        </button>
+                {/* ElevenLabs Settings */}
+                {state.enableSfx && (
+                   <div className="flex flex-col gap-3 border-l border-zinc-800 pl-6 pt-4">
+                      <div className="space-y-1">
+                         <label className="text-xs font-bold text-zinc-500 uppercase flex items-center gap-1">
+                            <Key size={12} />
+                            ElevenLabs API Key
+                         </label>
+                         <input 
+                           type="password" 
+                           value={state.elevenLabsApiKey}
+                           onChange={(e) => setState(prev => ({...prev, elevenLabsApiKey: e.target.value}))}
+                           placeholder="sk_..."
+                           className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:border-indigo-500/50 focus:outline-none"
+                         />
                       </div>
-                    )}
-                 </div>
-              )}
-           </div>
+
+                      {state.elevenLabsApiKey && (
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-zinc-300 text-sm">Use ElevenLabs for Voice?</span>
+                          <button 
+                            onClick={() => setState(prev => ({...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech}))}
+                            className={`text-2xl transition-colors ${state.useElevenLabsForSpeech ? 'text-indigo-400' : 'text-zinc-600'}`}
+                          >
+                            {state.useElevenLabsForSpeech ? <ToggleRight /> : <ToggleLeft />}
+                          </button>
+                        </div>
+                      )}
+                   </div>
+                )}
+             </div>
+           )}
         </section>
 
         {/* Story Input Section */}

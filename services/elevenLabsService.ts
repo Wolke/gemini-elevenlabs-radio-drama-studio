@@ -75,7 +75,7 @@ export const generateElevenLabsSpeech = async (
     },
     body: JSON.stringify({
       text: text,
-      model_id: "eleven_monolingual_v1", // or eleven_turbo_v2
+      model_id: "eleven_multilingual_v2", // Updated to multilingual model to support Chinese
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,

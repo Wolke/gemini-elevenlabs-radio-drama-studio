@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { DramaState, ItemType, ScriptItem, CastMember } from './types';
 import { generateScriptFromStory, generateSpeech } from './services/geminiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech } from './services/elevenLabsService';
-import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav } from './utils/audioUtils';
+import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload } from 'lucide-react';
 
 const VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
@@ -32,7 +32,11 @@ export default function App() {
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isProjectLoading, setIsProjectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Ref for file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleGenerateScript = async () => {
     if (!state.storyText.trim()) return;
@@ -172,6 +176,116 @@ export default function App() {
     setIsGeneratingAll(false);
   };
 
+  // --- Import / Export Project Logic ---
+
+  const handleSaveProject = async () => {
+    setIsProjectLoading(true);
+    try {
+      // 1. Serialize items: Convert AudioBuffers to Base64 (via WAV conversion)
+      const serializedItems = await Promise.all(state.items.map(async (item) => {
+        let audioBase64 = null;
+        if (item.audioBuffer) {
+          const wavBlob = bufferToWav(item.audioBuffer);
+          audioBase64 = await blobToBase64(wavBlob);
+        }
+        
+        // Exclude the runtime-only AudioBuffer object
+        const { audioBuffer, ...rest } = item;
+        
+        return {
+          ...rest,
+          audioBase64 // Store the encoded string
+        };
+      }));
+
+      // 2. Construct final JSON object
+      const projectData = {
+        version: 1,
+        timestamp: Date.now(),
+        state: {
+          ...state,
+          items: serializedItems,
+          // Reset runtime flags
+          isGeneratingScript: false,
+          isPlaying: false,
+          currentPlayingId: null
+        }
+      };
+
+      // 3. Trigger Download
+      const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gemini-drama-project-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+    } catch (e: any) {
+      console.error("Save failed", e);
+      alert("Failed to save project: " + e.message);
+    } finally {
+      setIsProjectLoading(false);
+    }
+  };
+
+  const handleLoadProject = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsProjectLoading(true);
+    try {
+      const text = await file.text();
+      const projectData = JSON.parse(text);
+      
+      if (!projectData.state || !Array.isArray(projectData.state.items)) {
+        throw new Error("Invalid project file format");
+      }
+
+      const ctx = getAudioContext();
+
+      // Hydrate items: Convert Base64 back to AudioBuffers
+      const hydratedItems = await Promise.all(projectData.state.items.map(async (item: any) => {
+        let audioBuffer: AudioBuffer | undefined = undefined;
+        
+        if (item.audioBase64 && typeof item.audioBase64 === 'string') {
+          // Remove Data URI prefix if present (e.g. "data:audio/wav;base64,")
+          const base64Data = item.audioBase64.split(',')[1] || item.audioBase64;
+          try {
+             audioBuffer = await decodeAudioFile(base64Data, ctx);
+          } catch (err) {
+            console.warn(`Failed to decode audio for item ${item.id}`, err);
+          }
+        }
+
+        const { audioBase64, ...rest } = item;
+        return { ...rest, audioBuffer };
+      }));
+
+      // Update State
+      setState({
+        ...projectData.state,
+        items: hydratedItems,
+        isPlaying: false,
+        currentPlayingId: null,
+        isGeneratingScript: false,
+      });
+
+      // Collapse config if loaded successfully to show content
+      setIsConfigExpanded(false);
+
+    } catch (e: any) {
+      console.error("Load failed", e);
+      alert("Failed to load project: " + e.message);
+    } finally {
+      setIsProjectLoading(false);
+      // Reset input so same file can be loaded again if needed
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const handleExportAudio = async () => {
     const buffersToMerge = state.items
       .map(item => item.audioBuffer)
@@ -223,39 +337,70 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-indigo-500/30">
       
+      {/* Hidden File Input for loading project */}
+      <input 
+        type="file" 
+        accept=".json"
+        ref={fileInputRef}
+        onChange={handleLoadProject}
+        className="hidden"
+      />
+
       {/* Navbar */}
       <header className="fixed top-0 w-full bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800 z-50">
-        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
               <Sparkles size={18} className="text-white" />
             </div>
-            <h1 className="font-bold text-lg tracking-tight">Gemini Studio</h1>
+            <h1 className="font-bold text-lg tracking-tight hidden sm:block">Gemini Studio</h1>
+            <h1 className="font-bold text-lg tracking-tight sm:hidden">Studio</h1>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+             {/* Project Controls */}
+             <div className="flex items-center gap-2 border-r border-zinc-800 pr-3 mr-1">
+                <button
+                  onClick={handleSaveProject}
+                  disabled={isProjectLoading || state.items.length === 0}
+                  className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-30"
+                  title="Save Project (JSON)"
+                >
+                  <Save size={20} />
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isProjectLoading}
+                  className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-30"
+                  title="Load Project (JSON)"
+                >
+                  {isProjectLoading ? <Loader2 size={20} className="animate-spin" /> : <FolderOpen size={20} />}
+                </button>
+             </div>
+
+             {/* Export & Play Controls */}
              {state.items.length > 0 && (
                 <>
                   <button
                     onClick={handleExportAudio}
                     disabled={isExporting}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors text-sm border border-zinc-700"
-                    title="Export merged audio"
+                    className="flex items-center gap-2 px-3 py-2 rounded-full font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors text-xs sm:text-sm border border-zinc-700"
+                    title="Export merged audio WAV"
                   >
                     {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                    <span className="hidden sm:inline">Export WAV</span>
+                    <span className="hidden md:inline">Export WAV</span>
                   </button>
 
                   <button
                     onClick={handlePlayToggle}
-                    className={`flex items-center gap-2 px-6 py-2 rounded-full font-medium transition-all ${
+                    className={`flex items-center gap-2 px-4 sm:px-6 py-2 rounded-full font-medium transition-all text-xs sm:text-sm ${
                       state.isPlaying 
                         ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/50' 
                         : 'bg-zinc-100 text-zinc-950 hover:bg-white border border-transparent'
                     }`}
                   >
                     {state.isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
-                    {state.isPlaying ? 'Stop Broadcast' : 'Play Drama'}
+                    {state.isPlaying ? 'Stop' : 'Play'}
                   </button>
                 </>
              )}

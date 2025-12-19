@@ -1,6 +1,7 @@
+
 import React from 'react';
-import { ItemType, ScriptItem } from '../types';
-import { Play, Square, Mic, Music, Trash2, ArrowUp, ArrowDown, Search, Loader2, Link as LinkIcon, Volume2, MessageSquare, RotateCw, Wand2, AlertCircle } from 'lucide-react';
+import { ItemType, ScriptItem, AspectRatio } from '../types';
+import { Play, Square, Mic, Music, Trash2, ArrowUp, ArrowDown, Search, Loader2, Link as LinkIcon, Volume2, MessageSquare, RotateCw, Wand2, AlertCircle, ImageIcon } from 'lucide-react';
 
 interface ScriptItemCardProps {
   item: ScriptItem;
@@ -8,14 +9,24 @@ interface ScriptItemCardProps {
   totalItems: number;
   assignedVoice?: string; 
   elevenLabsApiKey?: string;
+  enableImages: boolean;
+  aspectRatio: AspectRatio; // New prop
   onUpdate: (id: string, updates: Partial<ScriptItem>) => void;
   onRemove: (id: string) => void;
   onMove: (index: number, direction: 'up' | 'down') => void;
   onGenerateAudio: (id: string, text: string, voice: string, expression: string) => void;
   onGenerateSfx: (id: string, description: string) => void;
+  onGenerateImage: (id: string, prompt: string) => void;
   onPreviewAudio: (buffer: AudioBuffer) => void;
   isPlaying: boolean;
 }
+
+// Logic to check if character is a narrator (matching App.tsx)
+const isNarrator = (name?: string) => {
+  if (!name) return false;
+  const n = name.trim().toLowerCase();
+  return n === 'narrator' || n === '旁白' || n === 'system' || n.includes('narrator') || n.includes('旁白');
+};
 
 export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
   item,
@@ -23,11 +34,14 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
   totalItems,
   assignedVoice,
   elevenLabsApiKey,
+  enableImages,
+  aspectRatio,
   onUpdate,
   onRemove,
   onMove,
   onGenerateAudio,
   onGenerateSfx,
+  onGenerateImage,
   onPreviewAudio,
   isPlaying,
 }) => {
@@ -47,6 +61,14 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
     } catch (err) {}
     onUpdate(item.id, { youtubeId: val });
   };
+
+  // Determine container class based on aspect ratio
+  // For mobile (9:16), we want a taller container, but not too huge in the list view.
+  // We'll use a fixed width and let height adapt, or specific aspect classes.
+  const aspectClass = aspectRatio === '16:9' ? 'aspect-video' : 'aspect-[9/16]';
+
+  // Check if narrator
+  const isNarratorCharacter = isNarrator(item.character);
 
   return (
     <div className={`relative flex flex-col gap-3 p-4 rounded-xl border transition-all duration-300 ${
@@ -101,183 +123,147 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1">
-        {item.type === ItemType.SPEECH ? (
-          <div className="space-y-3">
-            {/* Expression Input */}
-            <div className="flex items-center gap-2 bg-zinc-950/30 p-2 rounded border border-zinc-800/50">
-               <MessageSquare size={14} className="text-zinc-500" />
-               <span className="text-xs text-zinc-500 whitespace-nowrap">Expression:</span>
-               <input 
-                 type="text" 
-                 value={item.expression || ''}
-                 onChange={(e) => onUpdate(item.id, { expression: e.target.value })}
-                 placeholder="e.g. whispering, shouting, cheerful"
-                 className="w-full bg-transparent text-xs text-amber-200 placeholder:text-zinc-700 focus:outline-none"
-               />
-            </div>
+      {/* Content Row: Text | (Optional) Image */}
+      <div className="flex flex-col md:flex-row gap-4">
+        
+        {/* Left: Text & Audio Controls */}
+        <div className="flex-1 space-y-3">
+          {item.type === ItemType.SPEECH ? (
+            <>
+              {/* Expression Input */}
+              <div className="flex items-center gap-2 bg-zinc-950/30 p-2 rounded border border-zinc-800/50">
+                <MessageSquare size={14} className="text-zinc-500" />
+                <span className="text-xs text-zinc-500 whitespace-nowrap">Expression:</span>
+                <input 
+                  type="text" 
+                  value={item.expression || ''}
+                  onChange={(e) => onUpdate(item.id, { expression: e.target.value })}
+                  placeholder="e.g. whispering, shouting, cheerful"
+                  className="w-full bg-transparent text-xs text-amber-200 placeholder:text-zinc-700 focus:outline-none"
+                />
+              </div>
 
-            <textarea 
-              value={item.text || ''}
-              onChange={(e) => onUpdate(item.id, { text: e.target.value })}
-              className="w-full bg-zinc-950/50 border border-zinc-700 rounded-lg p-3 text-zinc-200 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500/50 resize-none leading-relaxed"
-              rows={2}
-            />
-            
-            <div className="flex flex-col items-end gap-2">
-                <div className="flex items-center gap-2">
-                   {item.audioBuffer && (
-                      <button
-                        onClick={() => onPreviewAudio(item.audioBuffer!)}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/30 transition-colors"
-                      >
-                        <Play size={14} fill="currentColor" />
-                        Play Audio
-                      </button>
-                   )}
+              <textarea 
+                value={item.text || ''}
+                onChange={(e) => onUpdate(item.id, { text: e.target.value })}
+                className="w-full bg-zinc-950/50 border border-zinc-700 rounded-lg p-3 text-zinc-200 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500/50 resize-none leading-relaxed"
+                rows={2}
+              />
+            </>
+          ) : (
+            <>
+               <div className="flex items-center gap-2 bg-zinc-950/30 p-2 rounded border border-zinc-800/50">
+                 <span className="text-xs text-zinc-500 whitespace-nowrap font-bold">SFX Prompt:</span>
+                 <input 
+                   type="text" 
+                   value={item.sfxDescription || ''}
+                   onChange={(e) => onUpdate(item.id, { sfxDescription: e.target.value })}
+                   className="w-full bg-transparent text-xs text-amber-200 placeholder:text-zinc-700 focus:outline-none"
+                 />
+               </div>
+               
+               {!elevenLabsApiKey && (
+                  <div className="grid grid-cols-2 gap-2">
+                     <input 
+                      type="text" 
+                      placeholder="YouTube ID"
+                      value={item.youtubeId || ''}
+                      onChange={handleYoutubeChange}
+                      className="bg-zinc-950/50 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
+                     />
+                     <div className="flex gap-1">
+                        <input type="number" className="w-16 bg-zinc-950/50 border border-zinc-700 rounded px-1 py-1 text-xs" value={item.youtubeStartTime} onChange={(e) => onUpdate(item.id, {youtubeStartTime: Number(e.target.value)})} placeholder="Start" />
+                        <input type="number" className="w-16 bg-zinc-950/50 border border-zinc-700 rounded px-1 py-1 text-xs" value={item.youtubeDuration} onChange={(e) => onUpdate(item.id, {youtubeDuration: Number(e.target.value)})} placeholder="Dur" />
+                     </div>
+                  </div>
+               )}
+            </>
+          )}
 
-                   <button 
-                    onClick={() => onGenerateAudio(item.id, item.text || '', currentVoice, item.expression || '')}
-                    disabled={item.isLoadingAudio || !item.text}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      item.audioBuffer 
-                      ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200' 
-                      : 'bg-zinc-100 text-zinc-900 hover:bg-white'
-                    }`}
-                   >
-                     {item.isLoadingAudio ? (
-                       <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Generating...
-                       </>
-                     ) : item.audioBuffer ? (
-                       <>
-                        <RotateCw size={14} />
-                        Regenerate
-                       </>
-                     ) : (
-                       <>
-                        <Volume2 size={14} />
-                        Generate Audio
-                       </>
-                     )}
-                   </button>
-                </div>
+          {/* Audio Action Buttons */}
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+             {item.audioBuffer && (
+                <button
+                  onClick={() => onPreviewAudio(item.audioBuffer!)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/30 transition-colors"
+                >
+                  <Play size={14} fill="currentColor" />
+                  Play
+                </button>
+             )}
 
-                {item.generationError && (
-                  <div className="flex items-start gap-2 p-2 bg-red-900/30 border border-red-800/50 rounded-lg text-xs text-red-200 w-full">
-                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                    <span>{item.generationError}</span>
+             {item.type === ItemType.SPEECH ? (
+               <button 
+                onClick={() => onGenerateAudio(item.id, item.text || '', currentVoice, item.expression || '')}
+                disabled={item.isLoadingAudio || !item.text}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  item.audioBuffer 
+                  ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200' 
+                  : 'bg-zinc-100 text-zinc-900 hover:bg-white'
+                }`}
+               >
+                 {item.isLoadingAudio ? <Loader2 size={14} className="animate-spin" /> : (item.audioBuffer ? <RotateCw size={14} /> : <Volume2 size={14} />)}
+                 {item.audioBuffer ? 'Regenerate' : 'Generate Voice'}
+               </button>
+             ) : elevenLabsApiKey ? (
+               <button
+                  onClick={() => onGenerateSfx(item.id, item.sfxDescription || 'sound')}
+                  disabled={item.isLoadingAudio || !item.sfxDescription}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+               >
+                 {item.isLoadingAudio ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                 {item.audioBuffer ? 'Regenerate SFX' : 'Generate SFX'}
+               </button>
+             ) : null}
+          </div>
+          
+          {item.generationError && (
+             <div className="flex items-start gap-2 p-2 bg-red-900/30 border border-red-800/50 rounded-lg text-xs text-red-200 w-full">
+               <AlertCircle size={14} className="mt-0.5 shrink-0" />
+               <span>{item.generationError}</span>
+             </div>
+          )}
+        </div>
+
+        {/* Right: Image Generation (Only if enabled) */}
+        {enableImages && (
+          <div className={`w-full shrink-0 flex flex-col gap-2 ${aspectRatio === '9:16' ? 'md:w-32' : 'md:w-48'}`}>
+             <div className={`relative ${aspectClass} bg-black rounded-lg border border-zinc-800 overflow-hidden group`}>
+                {item.imageUrl ? (
+                  <img src={`data:image/png;base64,${item.imageUrl}`} className="w-full h-full object-cover" alt="Scene" />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-700 gap-1">
+                     <ImageIcon size={24} />
+                     <span className="text-[10px]">No Image</span>
                   </div>
                 )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-             <div className="flex items-center gap-2 bg-zinc-950/30 p-2 rounded border border-zinc-800/50">
-               <span className="text-xs text-zinc-500 whitespace-nowrap font-bold">SFX Prompt:</span>
-               <input 
-                 type="text" 
-                 value={item.sfxDescription || ''}
-                 onChange={(e) => onUpdate(item.id, { sfxDescription: e.target.value })}
-                 className="w-full bg-transparent text-xs text-amber-200 placeholder:text-zinc-700 focus:outline-none"
-               />
-             </div>
-            
-            {/* Logic split: If we have an API key, prioritize Generation, else fallback to YouTube */}
-            {elevenLabsApiKey ? (
-               <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                     <div className="flex items-center gap-2">
-                        {item.audioBuffer && (
-                          <button
-                            onClick={() => onPreviewAudio(item.audioBuffer!)}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/30 transition-colors"
-                          >
-                            <Play size={14} fill="currentColor" />
-                            Play Generated SFX
-                          </button>
-                        )}
-                     </div>
-                     
-                     <div className="flex flex-col items-end gap-2">
-                         <button
-                           onClick={() => onGenerateSfx(item.id, item.sfxDescription || 'sound')}
-                           disabled={item.isLoadingAudio || !item.sfxDescription}
-                           className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-md text-xs font-medium transition-colors disabled:opacity-50"
-                         >
-                           {item.isLoadingAudio ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-                           {item.audioBuffer ? 'Regenerate SFX' : 'Generate SFX (ElevenLabs)'}
-                         </button>
-                         
-                         {item.generationError && (
-                           <div className="flex items-start gap-2 p-2 bg-red-900/30 border border-red-800/50 rounded-lg text-xs text-red-200">
-                             <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                             <span>{item.generationError}</span>
-                           </div>
-                         )}
-                     </div>
-                  </div>
-               </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                   <div className="space-y-1">
-                     <label className="text-[10px] uppercase text-zinc-500 font-bold">YouTube Video ID</label>
-                     <div className="flex gap-2">
-                       <input 
-                        type="text" 
-                        placeholder="e.g. dQw4w9WgXcQ"
-                        value={item.youtubeId || ''}
-                        onChange={handleYoutubeChange}
-                        className="flex-1 bg-zinc-950/50 border border-zinc-700 rounded px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-amber-500/50"
-                       />
-                       <a 
-                        href={`https://www.youtube.com/results?search_query=${encodeURIComponent(item.sfxSearchQuery || 'sound effect')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded border border-zinc-700 transition-colors"
-                        title="Search YouTube"
-                       >
-                         <Search size={16} />
-                       </a>
-                     </div>
-                   </div>
-
-                   <div className="flex gap-2">
-                      <div className="space-y-1 flex-1">
-                        <label className="text-[10px] uppercase text-zinc-500 font-bold">Start (sec)</label>
-                        <input 
-                          type="number"
-                          min="0"
-                          value={item.youtubeStartTime}
-                          onChange={(e) => onUpdate(item.id, { youtubeStartTime: Number(e.target.value) })}
-                          className="w-full bg-zinc-950/50 border border-zinc-700 rounded px-2 py-2 text-xs text-zinc-300 focus:outline-none focus:border-amber-500/50"
-                        />
-                      </div>
-                      <div className="space-y-1 flex-1">
-                        <label className="text-[10px] uppercase text-zinc-500 font-bold">Duration (sec)</label>
-                         <input 
-                          type="number"
-                          min="1"
-                          value={item.youtubeDuration}
-                          onChange={(e) => onUpdate(item.id, { youtubeDuration: Number(e.target.value) })}
-                          className="w-full bg-zinc-950/50 border border-zinc-700 rounded px-2 py-2 text-xs text-zinc-300 focus:outline-none focus:border-amber-500/50"
-                        />
-                      </div>
-                   </div>
-                   
-                   {item.youtubeId && (
-                      <div className="mt-2 col-span-full rounded-lg overflow-hidden border border-zinc-800 bg-black h-32 relative">
-                        <div className="absolute inset-0 flex items-center justify-center text-zinc-600">
-                            <span className="text-xs">Video Preview Available on Playback</span>
-                        </div>
-                      </div>
-                    )}
+                
+                {/* Overlay Button */}
+                <div className={`absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity ${item.imageUrl ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
+                    <button 
+                      onClick={() => onGenerateImage(
+                        item.id, 
+                        item.type === ItemType.SPEECH 
+                          ? `${item.expression || 'dramatic'} mood, ${item.character} speaking` 
+                          : `${item.sfxDescription}`
+                      )}
+                      disabled={item.isGeneratingVisual}
+                      className="bg-zinc-100 text-black px-3 py-1.5 rounded-md text-xs font-bold hover:scale-105 transition-transform flex items-center gap-1"
+                    >
+                      {item.isGeneratingVisual ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                      {item.imageUrl ? 'Regen' : 'Gen'}
+                    </button>
                 </div>
-            )}
+             </div>
+             
+             {item.character && item.type === ItemType.SPEECH && !isNarratorCharacter && (
+                <p className="text-[10px] text-zinc-500 text-center">
+                  Uses {item.character}'s portrait as reference
+                </p>
+             )}
           </div>
         )}
+
       </div>
     </div>
   );

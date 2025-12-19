@@ -1,3 +1,4 @@
+
 export enum ItemType {
   SPEECH = 'speech',
   SFX = 'sfx',
@@ -5,8 +6,11 @@ export enum ItemType {
 
 export interface CastMember {
   name: string;
-  voice: string; // One of the 30 Gemini voices (e.g. 'Puck', 'Charon', 'Kore', 'Zephyr', 'Fenrir', etc.)
+  voice: string; // One of the 30 Gemini voices
   description?: string;
+  visualDescription?: string; // Physical appearance for image gen
+  imageUrl?: string; // Base64 character portrait
+  isGeneratingVisual?: boolean; // UI loading state
 }
 
 export interface ScriptItem {
@@ -23,6 +27,10 @@ export interface ScriptItem {
   isLoadingAudio?: boolean;
   generationError?: string; // Capture API errors here
   
+  // Image state
+  imageUrl?: string; // Base64 scene image
+  isGeneratingVisual?: boolean;
+
   // YouTube SFX state
   youtubeId?: string;
   youtubeStartTime?: number; // seconds
@@ -34,6 +42,8 @@ export interface CharacterVoice {
   voiceName: string;
 }
 
+export type AspectRatio = '16:9' | '9:16';
+
 export interface DramaState {
   storyText: string;
   cast: CastMember[];
@@ -44,6 +54,9 @@ export interface DramaState {
   
   // Configuration
   enableSfx: boolean;
+  enableImages: boolean; // New config
+  imageStyle: string; // e.g. "Watercolor", "Cyberpunk"
+  aspectRatio: AspectRatio; 
   elevenLabsApiKey: string;
   useElevenLabsForSpeech: boolean;
 }

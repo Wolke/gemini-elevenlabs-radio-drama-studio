@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { ItemType, ScriptItem, CastMember } from "../types";
+import { ItemType, ScriptItem, CastMember, AspectRatio } from "../types";
 
 // Initialize Gemini Client
 // NOTE: In a real app, ensure API_KEY is set in environment
@@ -26,14 +27,12 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
   if (includeSfx) {
     sfxInstructions = `
        - For 'sfx' (Sound Effects):
-         - 'sfxDescription': A short, descriptive prompt for a sound effect generator (e.g. "footsteps on gravel", "laser blast", "wind howling").
+         - 'sfxDescription': A short, descriptive prompt for a sound effect generator.
          - 'sfxSearchQuery': A keyword string for finding this sound on YouTube.
     `;
   } else {
     sfxInstructions = `
        - **IMPORTANT**: DO NOT generate any items with type 'sfx'. The user has disabled sound effects.
-       - Instead, use the Narrator character to describe the scene or action if necessary.
-       - Ensure the script relies entirely on dialogue and narration.
     `;
   }
 
@@ -43,47 +42,18 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
     
     **LANGUAGE INSTRUCTION**: 
     - The 'text' (dialogue) field MUST be in the SAME LANGUAGE as the input story. 
-    - If the story is in Traditional Chinese, the dialogue and character names must be in Traditional Chinese.
-    - If the story is in English, the dialogue must be in English.
-    - **CRITICAL**: The 'expression' field MUST ALWAYS be in ENGLISH, regardless of the story language.
-    
-    1. **Cast**: Identify all characters. Assign one of the following voices to each character based on their personality and the voice description:
-       - 'Zephyr' (Bright)
-       - 'Puck' (Upbeat)
-       - 'Charon' (Informative)
-       - 'Kore' (Firm)
-       - 'Fenrir' (Excitable)
-       - 'Leda' (Youthful)
-       - 'Orus' (Firm)
-       - 'Aoede' (Breezy)
-       - 'Callirrhoe' (Easy-going)
-       - 'Autonoe' (Bright)
-       - 'Enceladus' (Breathy)
-       - 'Iapetus' (Clear)
-       - 'Umbriel' (Easy-going)
-       - 'Algieba' (Smooth)
-       - 'Despina' (Smooth)
-       - 'Erinome' (Clear)
-       - 'Algenib' (Gravelly)
-       - 'Rasalgethi' (Informative)
-       - 'Laomedeia' (Upbeat)
-       - 'Achernar' (Soft)
-       - 'Alnilam' (Firm)
-       - 'Schedar' (Even)
-       - 'Gacrux' (Mature)
-       - 'Pulcherrima' (Forward)
-       - 'Achird' (Friendly)
-       - 'Zubenelgenubi' (Casual)
-       - 'Vindemiatrix' (Gentle)
-       - 'Sadachbia' (Lively)
-       - 'Sadaltager' (Knowledgeable)
-       - 'Sulafat' (Warm)
+    - The 'expression' field MUST ALWAYS be in ENGLISH.
+    - The 'visualDescription' for characters MUST be in ENGLISH (detailed physical appearance for image generation).
+
+    1. **Cast**: Identify all characters. 
+       - Assign a voice.
+       - Provide a 'visualDescription': A concise but evocative physical description (e.g., "A grizzled cyber-noir detective with a neon-lit trench coat").
        
     2. **Script**: A list of cues.
        - For 'speech':
          - 'character': Name from the cast list.
          - 'text': The dialogue (IN THE STORY'S LANGUAGE).
-         - 'expression': A direction for HOW it should be spoken. MUST BE IN ENGLISH (e.g., "whispering", "shouting angrily", "laughing", "sobbing", "sarcastic", "robotic", "gaspless", "terrified", "warmly", "coldly"). USE A WIDE VARIETY of at least 30 different emotional styles throughout the script if appropriate.
+         - 'expression': A direction for HOW it should be spoken (IN ENGLISH).
        ${sfxInstructions}
 
     Return a JSON object with keys "cast" and "script".
@@ -108,9 +78,10 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
                 properties: {
                   name: { type: Type.STRING },
                   voice: { type: Type.STRING, enum: ALL_VOICES },
-                  description: { type: Type.STRING }
+                  description: { type: Type.STRING },
+                  visualDescription: { type: Type.STRING, description: "Physical description for AI image generator" }
                 },
-                required: ["name", "voice"]
+                required: ["name", "voice", "visualDescription"]
               }
             },
             script: {
@@ -155,11 +126,7 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
 };
 
 export const generateSpeech = async (text: string, voiceName: string = 'Puck', expression: string = ''): Promise<string> => {
-  // Returns Base64 string of PCM audio
-  // We use the "Say [expression]: [text]" prompting technique for Gemini TTS to control style.
-  
   const textPrompt = expression ? `Say ${expression}: ${text}` : text;
-
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
@@ -173,14 +140,109 @@ export const generateSpeech = async (text: string, voiceName: string = 'Puck', e
         },
       },
     });
-
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) {
-      throw new Error("No audio data returned");
-    }
+    if (!base64Audio) throw new Error("No audio data returned");
     return base64Audio;
   } catch (error) {
     console.error("Error generating speech:", error);
     throw error;
   }
+};
+
+/**
+ * Base function for generating images
+ */
+const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, referenceImageBase64?: string): Promise<string> => {
+  try {
+    const parts: any[] = [];
+    
+    // If we have a reference image, add it first
+    if (referenceImageBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: 'image/png',
+          data: referenceImageBase64
+        }
+      });
+    }
+
+    parts.push({ text: prompt });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-image-preview',
+      contents: { parts },
+      config: {
+        imageConfig: {
+          aspectRatio: aspectRatio,
+          imageSize: "1K"
+        }
+      }
+    });
+
+    let base64Image = "";
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        base64Image = part.inlineData.data;
+        break;
+      }
+    }
+
+    if (!base64Image) throw new Error("No image generated.");
+    return base64Image;
+
+  } catch (error) {
+    console.error("Error generating image:", error);
+    throw error;
+  }
+};
+
+/**
+ * Generates a "Character Sheet" (Front, Side, Full Body)
+ * This is always generated in 16:9 to fit all views horizontally, 
+ * regardless of the main app aspect ratio setting, usually.
+ * But to support the "Mobile" request, we might stick to the requested ratio 
+ * or default to 16:9 for sheets as they need horizontal space.
+ * Let's force 16:9 for Character Sheets as they are reference materials.
+ */
+export const generateCharacterSheet = async (description: string, style: string): Promise<string> => {
+  const prompt = `
+    Character sheet design, ${style} style.
+    Character description: ${description}.
+    
+    REQUIRED FORMAT:
+    - Display strictly three views: Front view, Side view, and Full body pose.
+    - Neutral background.
+    - No text, no labels, no watermark.
+    - Clean lines, high detail.
+  `;
+  // Force 16:9 for character sheets to fit the 3 views comfortably
+  return generateRawImage(prompt, "16:9"); 
+};
+
+/**
+ * Generates a Scene/Dialogue Image
+ */
+export const generateSceneImage = async (
+  description: string, 
+  style: string, 
+  aspectRatio: AspectRatio, 
+  referenceImageBase64?: string
+): Promise<string> => {
+  let prompt = `
+    ${style} style.
+    Cinematic scene: ${description}.
+    
+    REQUIREMENTS:
+    - No text, no speech bubbles, no captions.
+    - Strong atmosphere and lighting.
+    - Focus on the scene composition.
+  `;
+  
+  if (referenceImageBase64) {
+    prompt += `
+    - IMPORTANT: Use the provided image as the exact character reference. Maintain facial features, hair, and costume details.
+    `;
+  }
+
+  return generateRawImage(prompt, aspectRatio, referenceImageBase64);
 };

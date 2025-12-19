@@ -1,11 +1,13 @@
+
 import React, { useState, useRef } from 'react';
 import { DramaState, ItemType, ScriptItem, CastMember } from './types';
-import { generateScriptFromStory, generateSpeech } from './services/geminiService';
+import { generateScriptFromStory, generateSpeech, generateCharacterSheet, generateSceneImage } from './services/geminiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech } from './services/elevenLabsService';
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
+import { generateVideoFromScript } from './utils/videoUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload, ImageIcon, Video, RefreshCw, Pencil, Palette, Smartphone, Monitor, ImagePlus, Mic } from 'lucide-react';
 
 const VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
@@ -16,6 +18,20 @@ const VOICES = [
   "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
 ].sort();
 
+const PRESET_STYLES = [
+  "Cinematic Realistic",
+  "Anime / Manga",
+  "Watercolor Picture Book",
+  "Cyberpunk / Neon",
+  "Vintage Noir",
+  "3D Animation Style"
+];
+
+const isNarrator = (name: string) => {
+  const n = name.trim().toLowerCase();
+  return n === 'narrator' || n === '旁白' || n === 'system' || n.includes('narrator') || n.includes('旁白');
+};
+
 export default function App() {
   const [state, setState] = useState<DramaState>({
     storyText: '',
@@ -25,14 +41,21 @@ export default function App() {
     isPlaying: false,
     currentPlayingId: null,
     enableSfx: false,
+    enableImages: true,
+    imageStyle: "Cinematic Realistic",
+    aspectRatio: "16:9",
     elevenLabsApiKey: '',
     useElevenLabsForSpeech: false,
   });
 
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isVideoExporting, setIsVideoExporting] = useState(false);
+  const [videoExportProgress, setVideoExportProgress] = useState("");
   const [isProjectLoading, setIsProjectLoading] = useState(false);
+  const [customStyle, setCustomStyle] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   // Ref for file input
@@ -45,12 +68,91 @@ export default function App() {
     setState(prev => ({ ...prev, isGeneratingScript: true }));
     
     try {
+      // 1. Generate Script text
       const { cast, items } = await generateScriptFromStory(state.storyText, state.enableSfx);
+      
+      // Update state immediately with text
       setState(prev => ({ ...prev, cast, items, isGeneratingScript: false }));
-      setIsConfigExpanded(false); // Collapse config after successful generation
+      setIsConfigExpanded(false);
+
+      // Auto-generation of character images is DISABLED per user request.
+      // Users can now click "Generate All Portraits" manually.
+
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
       setState(prev => ({ ...prev, isGeneratingScript: false }));
+    }
+  };
+
+  const handleGenerateAllCastImages = async () => {
+    if (state.cast.length === 0) return;
+    setIsGeneratingImages(true);
+    
+    // Filter members who need images AND are NOT narrators
+    const membersToProcess = state.cast.filter(m => 
+      !m.imageUrl && 
+      m.visualDescription && 
+      !isNarrator(m.name)
+    );
+
+    for (const member of membersToProcess) {
+      // Check if we are still processing (in case user clears project mid-way, though unlikely with async loop)
+      await handleGenerateCastImage(member.name, member.visualDescription!);
+      // Small delay to be polite to API rate limits
+      await new Promise(r => setTimeout(r, 1500)); 
+    }
+    
+    setIsGeneratingImages(false);
+  };
+
+  const handleGenerateAllSceneImages = async () => {
+    if (state.items.length === 0) return;
+    setIsGeneratingImages(true);
+
+    const itemsToProcess = state.items.filter(item => 
+      !item.imageUrl && (
+        (item.type === ItemType.SPEECH && item.character) || 
+        (item.type === ItemType.SFX && item.sfxDescription)
+      )
+    );
+
+    for (const item of itemsToProcess) {
+       let prompt = "";
+       if (item.type === ItemType.SPEECH) {
+          prompt = `${item.expression || 'dramatic'} mood, ${item.character} speaking`;
+       } else {
+          prompt = item.sfxDescription || "Scene";
+       }
+       
+       await handleGenerateItemImage(item.id, prompt);
+       // Delay for rate limits
+       await new Promise(r => setTimeout(r, 2000));
+    }
+    setIsGeneratingImages(false);
+  };
+
+  const handleGenerateCastImage = async (name: string, description: string) => {
+    // Set loading state
+    setState(prev => ({
+      ...prev,
+      cast: prev.cast.map(c => c.name === name ? { ...c, isGeneratingVisual: true } : c)
+    }));
+
+    try {
+      // Use the new generateCharacterSheet function
+      const finalStyle = customStyle || state.imageStyle;
+      const b64 = await generateCharacterSheet(description, finalStyle);
+      
+      setState(prev => ({
+        ...prev,
+        cast: prev.cast.map(c => c.name === name ? { ...c, imageUrl: b64, isGeneratingVisual: false } : c)
+      }));
+    } catch (e) {
+      console.error(`Failed gen image for ${name}`, e);
+      setState(prev => ({
+        ...prev,
+        cast: prev.cast.map(c => c.name === name ? { ...c, isGeneratingVisual: false } : c)
+      }));
     }
   };
 
@@ -78,28 +180,23 @@ export default function App() {
     }
   };
 
-  const handleUpdateCastVoice = (characterName: string, voice: string) => {
+  const handleUpdateCast = (characterName: string, updates: Partial<CastMember>) => {
     setState(prev => ({
       ...prev,
-      cast: prev.cast.map(c => c.name === characterName ? { ...c, voice } : c)
+      cast: prev.cast.map(c => c.name === characterName ? { ...c, ...updates } : c)
     }));
   };
 
   const handleGenerateAudio = async (id: string, text: string, voice: string, expression: string) => {
-    // Reset error state and set loading
     handleUpdateItem(id, { isLoadingAudio: true, generationError: undefined });
-    
     try {
       const ctx = getAudioContext();
       let buffer: AudioBuffer;
 
       if (state.useElevenLabsForSpeech && state.elevenLabsApiKey) {
-        // Use ElevenLabs
         const base64 = await generateElevenLabsSpeech(text, voice, state.elevenLabsApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else {
-        // Use Gemini
-        // We explicitly pass the parameters here, which come from the component's current props
         const base64 = await generateSpeech(text, voice, expression);
         buffer = await decodeRawPCM(base64, ctx);
       }
@@ -111,7 +208,6 @@ export default function App() {
       });
     } catch (e: any) {
       console.error(e);
-      // Store the specific error message on the item so the user can see it
       handleUpdateItem(id, { 
         isLoadingAudio: false,
         generationError: e.message || "Unknown error occurred"
@@ -124,9 +220,7 @@ export default function App() {
       alert("Please enter an ElevenLabs API Key in settings first.");
       return;
     }
-    
     handleUpdateItem(id, { isLoadingAudio: true, generationError: undefined });
-
     try {
       const base64 = await generateElevenLabsSfx(description, 4, state.elevenLabsApiKey);
       const ctx = getAudioContext();
@@ -136,7 +230,6 @@ export default function App() {
         audioBuffer: buffer, 
         isLoadingAudio: false,
         generationError: undefined,
-        // Clear Youtube settings if we successfully generated an audio file
         youtubeId: undefined
       });
     } catch (e: any) {
@@ -148,456 +241,603 @@ export default function App() {
     }
   };
 
+  const handleGenerateItemImage = async (id: string, prompt: string) => {
+    handleUpdateItem(id, { isGeneratingVisual: true });
+    try {
+      const item = state.items.find(i => i.id === id);
+      let refImage = undefined;
+      
+      // Find character reference image for consistency
+      // Exclude Narrator from reference logic
+      if (item && item.character && !isNarrator(item.character)) {
+        const member = state.cast.find(c => c.name === item.character);
+        if (member && member.imageUrl) {
+          refImage = member.imageUrl;
+        }
+      }
+
+      const finalStyle = customStyle || state.imageStyle;
+      const b64 = await generateSceneImage(prompt, finalStyle, state.aspectRatio, refImage);
+      
+      handleUpdateItem(id, { imageUrl: b64, isGeneratingVisual: false });
+    } catch (e: any) {
+      console.error(e);
+      handleUpdateItem(id, { isGeneratingVisual: false, generationError: "Image Gen Failed" });
+    }
+  };
+
   const handleGenerateAllAudio = async () => {
     if (state.items.length === 0) return;
-    
     setIsGeneratingAll(true);
-    
     const itemsToProcess = state.items.filter(item => 
-      // Generate speech if missing
       (item.type === ItemType.SPEECH && !item.audioBuffer) ||
-      // Generate SFX if missing and EL is enabled (optional, but good for "one click")
       (item.type === ItemType.SFX && !item.audioBuffer && state.elevenLabsApiKey && item.sfxDescription)
     );
 
     for (const item of itemsToProcess) {
-      if (item.type === ItemType.SPEECH) {
-        const castMember = state.cast.find(c => c.name === item.character);
-        const voice = castMember?.voice || 'Puck';
-        await handleGenerateAudio(item.id, item.text || '', voice, item.expression || '');
-      } else if (item.type === ItemType.SFX && state.elevenLabsApiKey) {
-        await handleGenerateSfx(item.id, item.sfxDescription || 'sound');
-      }
-      
-      // Delay to respect rate limits
-      await new Promise(resolve => setTimeout(resolve, 500));
+       if (item.type === ItemType.SPEECH && item.text) {
+          const char = state.cast.find(c => c.name === item.character);
+          await handleGenerateAudio(item.id, item.text, char?.voice || 'Puck', item.expression || '');
+       } else if (item.type === ItemType.SFX && item.sfxDescription) {
+          await handleGenerateSfx(item.id, item.sfxDescription);
+       }
+       // Small delay to be nice to API
+       await new Promise(r => setTimeout(r, 500));
     }
-    
     setIsGeneratingAll(false);
   };
 
-  // --- Import / Export Project Logic ---
-
-  const handleSaveProject = async () => {
-    setIsProjectLoading(true);
-    try {
-      // 1. Serialize items: Convert AudioBuffers to Base64 (via WAV conversion)
-      const serializedItems = await Promise.all(state.items.map(async (item) => {
-        let audioBase64 = null;
-        if (item.audioBuffer) {
-          const wavBlob = bufferToWav(item.audioBuffer);
-          audioBase64 = await blobToBase64(wavBlob);
-        }
-        
-        // Exclude the runtime-only AudioBuffer object
-        const { audioBuffer, ...rest } = item;
-        
-        return {
-          ...rest,
-          audioBase64 // Store the encoded string
-        };
-      }));
-
-      // 2. Construct final JSON object
-      const projectData = {
-        version: 1,
-        timestamp: Date.now(),
-        state: {
-          ...state,
-          items: serializedItems,
-          // Reset runtime flags
-          isGeneratingScript: false,
-          isPlaying: false,
-          currentPlayingId: null
-        }
-      };
-
-      // 3. Trigger Download
-      const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `gemini-drama-project-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-    } catch (e: any) {
-      console.error("Save failed", e);
-      alert("Failed to save project: " + e.message);
-    } finally {
-      setIsProjectLoading(false);
-    }
-  };
-
-  const handleLoadProject = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsProjectLoading(true);
-    try {
-      const text = await file.text();
-      const projectData = JSON.parse(text);
-      
-      if (!projectData.state || !Array.isArray(projectData.state.items)) {
-        throw new Error("Invalid project file format");
-      }
-
-      const ctx = getAudioContext();
-
-      // Hydrate items: Convert Base64 back to AudioBuffers
-      const hydratedItems = await Promise.all(projectData.state.items.map(async (item: any) => {
-        let audioBuffer: AudioBuffer | undefined = undefined;
-        
-        if (item.audioBase64 && typeof item.audioBase64 === 'string') {
-          // Remove Data URI prefix if present (e.g. "data:audio/wav;base64,")
-          const base64Data = item.audioBase64.split(',')[1] || item.audioBase64;
-          try {
-             audioBuffer = await decodeAudioFile(base64Data, ctx);
-          } catch (err) {
-            console.warn(`Failed to decode audio for item ${item.id}`, err);
-          }
-        }
-
-        const { audioBase64, ...rest } = item;
-        return { ...rest, audioBuffer };
-      }));
-
-      // Update State
-      setState({
-        ...projectData.state,
-        items: hydratedItems,
-        isPlaying: false,
-        currentPlayingId: null,
-        isGeneratingScript: false,
-      });
-
-      // Collapse config if loaded successfully to show content
-      setIsConfigExpanded(false);
-
-    } catch (e: any) {
-      console.error("Load failed", e);
-      alert("Failed to load project: " + e.message);
-    } finally {
-      setIsProjectLoading(false);
-      // Reset input so same file can be loaded again if needed
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const handleExportAudio = async () => {
-    const buffersToMerge = state.items
-      .map(item => item.audioBuffer)
-      .filter((b): b is AudioBuffer => !!b);
-
-    if (buffersToMerge.length === 0) {
-      alert("No generated audio found to export.");
-      return;
-    }
-
+  const handleExportWav = async () => {
     setIsExporting(true);
     try {
-      const mergedBuffer = await mergeAudioBuffers(buffersToMerge);
-      const wavBlob = bufferToWav(mergedBuffer);
-      
-      // Trigger download
+      // Filter items that have audio buffers
+      const buffers = state.items
+        .map(i => i.audioBuffer)
+        .filter((b): b is AudioBuffer => !!b);
+
+      if (buffers.length === 0) {
+        alert("No generated audio to export.");
+        setIsExporting(false);
+        return;
+      }
+
+      const merged = await mergeAudioBuffers(buffers);
+      const wavBlob = bufferToWav(merged);
       const url = URL.createObjectURL(wavBlob);
+      
       const a = document.createElement('a');
       a.href = url;
-      a.download = `gemini-drama-${Date.now()}.wav`;
-      document.body.appendChild(a);
+      a.download = 'radio_drama.wav';
       a.click();
-      document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Export failed:", err);
-      alert("Failed to export audio.");
+    } catch (e) {
+      console.error(e);
+      alert("Export failed.");
     } finally {
       setIsExporting(false);
     }
   };
 
-  const handlePreviewAudio = (buffer: AudioBuffer) => {
-    const ctx = getAudioContext();
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start();
+  const handleExportVideo = async () => {
+    setIsVideoExporting(true);
+    setVideoExportProgress("Initializing...");
+    try {
+      const blob = await generateVideoFromScript(
+        state.items, 
+        state.cast, 
+        state.aspectRatio, 
+        (msg) => setVideoExportProgress(msg)
+      );
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'radio_drama_video.webm';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert("Video generation failed. Ensure you have generated images and audio first.");
+    } finally {
+      setIsVideoExporting(false);
+      setVideoExportProgress("");
+    }
   };
 
-  const handlePlayToggle = () => {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
+  // --- Project Save/Load Logic ---
+  
+  const handleSaveProject = async () => {
+     // We need to convert AudioBuffers to Base64 to save them
+     const itemsToSave = await Promise.all(state.items.map(async (item) => {
+        let audioBase64 = undefined;
+        if (item.audioBuffer) {
+           const wav = bufferToWav(item.audioBuffer);
+           audioBase64 = await blobToBase64(wav);
+        }
+        return {
+           ...item,
+           audioBuffer: undefined, // Don't save circular object
+           _audioBase64: audioBase64 // Save encoded
+        };
+     }));
+
+     const projectData = {
+        version: 1,
+        date: new Date().toISOString(),
+        storyText: state.storyText,
+        cast: state.cast,
+        items: itemsToSave,
+        config: {
+           enableSfx: state.enableSfx,
+           enableImages: state.enableImages,
+           imageStyle: state.imageStyle,
+           aspectRatio: state.aspectRatio,
+           useElevenLabsForSpeech: state.useElevenLabsForSpeech
+        }
+     };
+
+     const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
+     const url = URL.createObjectURL(blob);
+     const a = document.createElement('a');
+     a.href = url;
+     a.download = 'gemini_drama_project.json';
+     a.click();
+     URL.revokeObjectURL(url);
+  };
+
+  const handleLoadProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsProjectLoading(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+       try {
+          const json = JSON.parse(event.target?.result as string);
+          
+          // Restore items
+          const ctx = getAudioContext();
+          const restoredItems = await Promise.all(json.items.map(async (item: any) => {
+             let audioBuffer = null;
+             if (item._audioBase64) {
+                let b64 = item._audioBase64;
+                if (b64.includes(',')) b64 = b64.split(',')[1];
+                audioBuffer = await decodeAudioFile(b64, ctx);
+             }
+             const { _audioBase64, ...rest } = item;
+             return { ...rest, audioBuffer };
+          }));
+
+          setState(prev => ({
+             ...prev,
+             storyText: json.storyText || '',
+             cast: json.cast || [],
+             items: restoredItems,
+             enableSfx: json.config?.enableSfx ?? false,
+             enableImages: json.config?.enableImages ?? true,
+             imageStyle: json.config?.imageStyle || "Cinematic Realistic",
+             aspectRatio: json.config?.aspectRatio || "16:9",
+             useElevenLabsForSpeech: json.config?.useElevenLabsForSpeech ?? false,
+             isPlaying: false,
+             currentPlayingId: null
+          }));
+
+       } catch (err) {
+          console.error(err);
+          alert("Failed to load project file.");
+       } finally {
+          setIsProjectLoading(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+       }
+    };
+    reader.readAsText(file);
+  };
+
+  const togglePlay = () => {
     setState(prev => ({ ...prev, isPlaying: !prev.isPlaying }));
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-zinc-950 text-zinc-200 p-4 md:p-8 max-w-5xl mx-auto">
       
-      {/* Hidden File Input for loading project */}
-      <input 
-        type="file" 
-        accept=".json"
-        ref={fileInputRef}
-        onChange={handleLoadProject}
-        className="hidden"
-      />
+      {/* Hidden File Input */}
+      <input type="file" ref={fileInputRef} onChange={handleLoadProject} accept=".json" className="hidden" />
 
-      {/* Navbar */}
-      <header className="fixed top-0 w-full bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Sparkles size={18} className="text-white" />
-            </div>
-            <h1 className="font-bold text-lg tracking-tight hidden sm:block">Gemini Studio</h1>
-            <h1 className="font-bold text-lg tracking-tight sm:hidden">Studio</h1>
-          </div>
-          
-          <div className="flex items-center gap-2 sm:gap-3">
-             {/* Project Controls */}
-             <div className="flex items-center gap-2 border-r border-zinc-800 pr-3 mr-1">
-                <button
-                  onClick={handleSaveProject}
-                  disabled={isProjectLoading || state.items.length === 0}
-                  className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-30"
-                  title="Save Project (JSON)"
-                >
-                  <Save size={20} />
-                </button>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isProjectLoading}
-                  className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-30"
-                  title="Load Project (JSON)"
-                >
-                  {isProjectLoading ? <Loader2 size={20} className="animate-spin" /> : <FolderOpen size={20} />}
-                </button>
-             </div>
-
-             {/* Export & Play Controls */}
-             {state.items.length > 0 && (
-                <>
-                  <button
-                    onClick={handleExportAudio}
-                    disabled={isExporting}
-                    className="flex items-center gap-2 px-3 py-2 rounded-full font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors text-xs sm:text-sm border border-zinc-700"
-                    title="Export merged audio WAV"
-                  >
-                    {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                    <span className="hidden md:inline">Export WAV</span>
-                  </button>
-
-                  <button
-                    onClick={handlePlayToggle}
-                    className={`flex items-center gap-2 px-4 sm:px-6 py-2 rounded-full font-medium transition-all text-xs sm:text-sm ${
-                      state.isPlaying 
-                        ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/50' 
-                        : 'bg-zinc-100 text-zinc-950 hover:bg-white border border-transparent'
-                    }`}
-                  >
-                    {state.isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
-                    {state.isPlaying ? 'Stop' : 'Play'}
-                  </button>
-                </>
-             )}
-          </div>
+      {/* Header */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-amber-200 bg-clip-text text-transparent flex items-center gap-2">
+            <Sparkles className="text-amber-200" />
+            Gemini Radio Drama Studio
+          </h1>
+          <p className="text-zinc-500 text-sm mt-1">Convert stories into full-cast audio dramas with AI visuals</p>
+        </div>
+        
+        <div className="flex gap-2">
+           <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg hover:bg-zinc-800 text-xs font-medium transition-colors">
+              {isProjectLoading ? <Loader2 className="animate-spin" size={14} /> : <FolderOpen size={14} />}
+              Load
+           </button>
+           <button onClick={handleSaveProject} className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg hover:bg-zinc-800 text-xs font-medium transition-colors">
+              <Save size={14} />
+              Save
+           </button>
+           <button 
+             onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+             className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-xs font-medium transition-colors ${isConfigExpanded ? 'bg-zinc-800 border-zinc-600' : 'bg-zinc-900 border-zinc-700 hover:bg-zinc-800'}`}
+           >
+             <Settings2 size={14} />
+             Config
+           </button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 pt-24 pb-20 space-y-12">
+      {/* Configuration Panel */}
+      {isConfigExpanded && (
+        <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 mb-8 animate-in fade-in slide-in-from-top-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+               <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                 <FileText size={16} /> Story Input
+               </h3>
+               <textarea
+                 value={state.storyText}
+                 onChange={(e) => setState(prev => ({ ...prev, storyText: e.target.value }))}
+                 placeholder="Paste your story or scene description here..."
+                 className="w-full h-40 bg-black/40 border border-zinc-700 rounded-lg p-4 text-sm focus:outline-none focus:border-indigo-500 resize-none"
+               />
+               <button 
+                 onClick={handleGenerateScript}
+                 disabled={state.isGeneratingScript || !state.storyText.trim()}
+                 className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+               >
+                 {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
+                 Generate Script & Cast
+               </button>
+               {error && <p className="text-red-400 text-xs text-center">{error}</p>}
+            </div>
 
-        {/* Configuration Section */}
-        <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden transition-all">
-           <div 
-             className="flex items-center justify-between p-5 cursor-pointer bg-zinc-900/50 hover:bg-zinc-900 transition-colors"
-             onClick={() => setIsConfigExpanded(!isConfigExpanded)}
-           >
-             <div className="flex items-center gap-2 text-zinc-400">
-                <Settings2 size={18} />
-                <h3 className="font-semibold text-sm uppercase tracking-wider">Configuration</h3>
-             </div>
-             {isConfigExpanded ? <ChevronUp size={16} className="text-zinc-500" /> : <ChevronDown size={16} className="text-zinc-500" />}
-           </div>
-           
-           {isConfigExpanded && (
-             <div className="p-5 pt-0 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-zinc-800/50 mt-2">
-                {/* SFX Toggle */}
-                <div className="flex flex-col gap-2 pt-4">
-                   <div className="flex items-center justify-between">
-                      <span className="text-zinc-300 text-sm">Include Sound Effects (SFX)</span>
-                      <button 
-                        onClick={() => setState(prev => ({...prev, enableSfx: !prev.enableSfx}))}
-                        className={`text-2xl transition-colors ${state.enableSfx ? 'text-indigo-400' : 'text-zinc-600'}`}
-                      >
-                        {state.enableSfx ? <ToggleRight /> : <ToggleLeft />}
-                      </button>
-                   </div>
-                   <p className="text-xs text-zinc-500">If enabled, the AI will add sound effect cues to the script.</p>
-                </div>
-
-                {/* ElevenLabs Settings */}
-                {state.enableSfx && (
-                   <div className="flex flex-col gap-3 border-l border-zinc-800 pl-6 pt-4">
-                      <div className="space-y-1">
-                         <label className="text-xs font-bold text-zinc-500 uppercase flex items-center gap-1">
-                            <Key size={12} />
-                            ElevenLabs API Key
-                         </label>
-                         <input 
-                           type="password" 
-                           value={state.elevenLabsApiKey}
-                           onChange={(e) => setState(prev => ({...prev, elevenLabsApiKey: e.target.value}))}
-                           placeholder="sk_..."
-                           className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:border-indigo-500/50 focus:outline-none"
-                         />
-                      </div>
-
-                      {state.elevenLabsApiKey && (
-                        <div className="flex items-center justify-between pt-1">
-                          <span className="text-zinc-300 text-sm">Use ElevenLabs for Voice?</span>
-                          <button 
-                            onClick={() => setState(prev => ({...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech}))}
-                            className={`text-2xl transition-colors ${state.useElevenLabsForSpeech ? 'text-indigo-400' : 'text-zinc-600'}`}
-                          >
-                            {state.useElevenLabsForSpeech ? <ToggleRight /> : <ToggleLeft />}
-                          </button>
+            <div className="space-y-6">
+               <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                 <Settings2 size={16} /> Settings
+               </h3>
+               
+               <div className="space-y-4">
+                  {/* Image Enable Toggle */}
+                  <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                     <div className="flex items-center gap-3">
+                        <div className="p-2 bg-pink-500/10 text-pink-400 rounded-md">
+                           <ImageIcon size={18} />
                         </div>
-                      )}
-                   </div>
+                        <div>
+                           <p className="text-sm font-medium">Character & Scene Images</p>
+                           <p className="text-xs text-zinc-500">Enable visual generation</p>
+                        </div>
+                     </div>
+                     <button onClick={() => setState(prev => ({...prev, enableImages: !prev.enableImages}))}>
+                        {state.enableImages ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                     </button>
+                  </div>
+                  
+                  {/* Image Configuration (Conditional) */}
+                  {state.enableImages && (
+                    <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-4 animate-in fade-in">
+                       {/* Aspect Ratio */}
+                       <div className="flex flex-col gap-2">
+                          <label className="text-xs text-zinc-500 font-semibold uppercase flex items-center gap-1">
+                             <Monitor size={12} /> Aspect Ratio
+                          </label>
+                          <div className="flex gap-2">
+                             <button 
+                               onClick={() => setState(prev => ({...prev, aspectRatio: "16:9"}))}
+                               className={`flex-1 py-1.5 px-3 rounded text-xs border ${state.aspectRatio === "16:9" ? "bg-indigo-600 border-indigo-500 text-white" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}
+                             >
+                                <Monitor size={14} className="inline mr-1" /> General (16:9)
+                             </button>
+                             <button 
+                               onClick={() => setState(prev => ({...prev, aspectRatio: "9:16"}))}
+                               className={`flex-1 py-1.5 px-3 rounded text-xs border ${state.aspectRatio === "9:16" ? "bg-indigo-600 border-indigo-500 text-white" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}
+                             >
+                                <Smartphone size={14} className="inline mr-1" /> Mobile (9:16)
+                             </button>
+                          </div>
+                       </div>
+
+                       {/* Image Style */}
+                       <div className="flex flex-col gap-2">
+                          <label className="text-xs text-zinc-500 font-semibold uppercase flex items-center gap-1">
+                             <Palette size={12} /> Visual Style
+                          </label>
+                          <select 
+                            value={state.imageStyle}
+                            onChange={(e) => {
+                               setState(prev => ({...prev, imageStyle: e.target.value}));
+                               if (e.target.value !== "Custom") setCustomStyle("");
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-2 text-xs focus:outline-none"
+                          >
+                            {PRESET_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
+                            <option value="Custom">Custom...</option>
+                          </select>
+                          
+                          {(state.imageStyle === "Custom" || customStyle) && (
+                             <input 
+                               type="text" 
+                               value={customStyle}
+                               onChange={(e) => {
+                                  setCustomStyle(e.target.value);
+                                  setState(prev => ({...prev, imageStyle: "Custom"}));
+                               }}
+                               placeholder="Enter custom art style..."
+                               className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-2 text-xs focus:outline-none focus:border-indigo-500"
+                             />
+                          )}
+                       </div>
+                    </div>
+                  )}
+
+                  {/* SFX Toggle */}
+                  <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                     <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
+                           <Speaker size={18} />
+                        </div>
+                        <div>
+                           <p className="text-sm font-medium">Sound Effects</p>
+                           <p className="text-xs text-zinc-500">Include SFX cues</p>
+                        </div>
+                     </div>
+                     <button onClick={() => setState(prev => ({...prev, enableSfx: !prev.enableSfx}))}>
+                        {state.enableSfx ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                     </button>
+                  </div>
+
+                  {/* ElevenLabs Config */}
+                  <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-3">
+                      <div className="flex items-center justify-between">
+                         <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
+                               <Key size={18} />
+                            </div>
+                            <div>
+                               <p className="text-sm font-medium">ElevenLabs API (Optional)</p>
+                            </div>
+                         </div>
+                         <button onClick={() => setState(prev => ({...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech}))} disabled={!state.elevenLabsApiKey}>
+                            {state.useElevenLabsForSpeech ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                         </button>
+                      </div>
+                      <input 
+                        type="password" 
+                        placeholder="API Key"
+                        value={state.elevenLabsApiKey}
+                        onChange={(e) => setState(prev => ({...prev, elevenLabsApiKey: e.target.value}))}
+                        className="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs"
+                      />
+                  </div>
+               </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Main Content Area */}
+      {state.cast.length > 0 && (
+        <main className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
+          
+          {/* Left Column: Cast */}
+          <section className="lg:col-span-1 space-y-4">
+             <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Users size={18} className="text-indigo-400" /> Cast
+                </h2>
+                {state.enableImages && (
+                  <button 
+                    onClick={handleGenerateAllCastImages}
+                    disabled={isGeneratingImages}
+                    className="flex items-center gap-2 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-medium transition-colors"
+                  >
+                    {isGeneratingImages ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
+                    Generate All Portraits
+                  </button>
                 )}
              </div>
-           )}
-        </section>
-
-        {/* Story Input Section */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-2 mb-2">
-             <FileText className="text-zinc-500" size={20}/>
-             <h2 className="text-xl font-semibold text-zinc-200">The Script</h2>
-          </div>
-          
-          <div className="relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl opacity-20 group-focus-within:opacity-50 transition duration-500 blur"></div>
-            <div className="relative">
-              <textarea 
-                value={state.storyText}
-                onChange={(e) => setState(prev => ({ ...prev, storyText: e.target.value }))}
-                placeholder="Enter your story here... (e.g., 'Once upon a time in a futuristic city, Detective John found a mysterious glowing orb...')"
-                className="w-full h-48 bg-zinc-900 rounded-xl p-6 text-zinc-300 placeholder:text-zinc-600 focus:outline-none resize-none text-lg leading-relaxed shadow-xl"
-              />
-              <div className="absolute bottom-4 right-4">
-                 <button 
-                  onClick={handleGenerateScript}
-                  disabled={state.isGeneratingScript || !state.storyText.trim()}
-                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-900/20"
-                 >
-                   {state.isGeneratingScript ? <Settings2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
-                   {state.isGeneratingScript ? 'Writing Script...' : 'Convert to Script'}
-                 </button>
-              </div>
-            </div>
-          </div>
-          
-          {error && (
-            <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-lg flex items-center gap-3">
-              <AlertCircle size={20} />
-              <p>{error}</p>
-            </div>
-          )}
-        </section>
-
-        {/* Cast Section */}
-        {state.cast.length > 0 && (
-          <section className="space-y-4">
-             <div className="flex items-center gap-2 mb-2">
-                <Users className="text-zinc-500" size={20}/>
-                <h2 className="text-xl font-semibold text-zinc-200">Cast & Voices</h2>
-             </div>
              
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {state.cast.map((member, idx) => (
-                  <div key={idx} className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 p-3 rounded-lg">
-                     <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500">
-                        <User size={20} />
-                     </div>
-                     <div className="flex-1 min-w-0">
-                       <h3 className="font-medium text-zinc-200 truncate">{member.name}</h3>
-                       {member.description && <p className="text-xs text-zinc-500 truncate">{member.description}</p>}
-                     </div>
-                     {/* If using ElevenLabs, the dropdown technically maps to a hidden ID, but we keep the visual metaphor of the 'Gemini' personality type */}
-                     <select 
-                        value={member.voice}
-                        onChange={(e) => handleUpdateCastVoice(member.name, e.target.value)}
-                        className="bg-zinc-950 border border-zinc-700 text-xs text-zinc-300 rounded px-2 py-1 focus:outline-none"
-                     >
-                       {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                     </select>
-                  </div>
-                ))}
-             </div>
-          </section>
-        )}
-
-        {/* Timeline Editor Section */}
-        {state.items.length > 0 && (
-          <section className="space-y-6">
-             <div className="flex items-center justify-between">
-               <div className="flex items-center gap-4">
-                 <h2 className="text-xl font-semibold text-zinc-200">Production Timeline</h2>
-                 <span className="text-sm text-zinc-500">{state.items.length} cues</span>
-               </div>
-               
-               <button 
-                onClick={handleGenerateAllAudio}
-                disabled={isGeneratingAll}
-                className="flex items-center gap-2 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-               >
-                 {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
-                 {isGeneratingAll ? 'Generating...' : 'Generate All Missing Audio'}
-               </button>
-             </div>
-
-             <div className="space-y-4 relative">
-                {/* Connector Line */}
-                <div className="absolute left-8 top-0 bottom-0 w-px bg-zinc-800 -z-10" />
-
-                {state.items.map((item, index) => {
-                  const member = state.cast.find(c => c.name === item.character);
+             <div className="space-y-4">
+                {state.cast.map((member, idx) => {
+                  const isNarratorMember = isNarrator(member.name);
                   return (
-                    <div key={item.id} className="relative pl-0"> 
-                      <ScriptItemCard 
-                        item={item}
-                        index={index}
-                        totalItems={state.items.length}
-                        assignedVoice={member?.voice}
-                        elevenLabsApiKey={state.elevenLabsApiKey}
-                        onUpdate={handleUpdateItem}
-                        onRemove={handleRemoveItem}
-                        onMove={handleMoveItem}
-                        onGenerateAudio={handleGenerateAudio}
-                        onGenerateSfx={handleGenerateSfx}
-                        onPreviewAudio={handlePreviewAudio}
-                        isPlaying={state.currentPlayingId === item.id}
-                      />
+                    <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col gap-3">
+                       <div className="flex items-start gap-3">
+                          {/* Cast Portrait - Show Mic icon if Narrator */}
+                          <div className="w-24 h-24 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700 relative group flex items-center justify-center text-zinc-600">
+                            {member.imageUrl ? (
+                               <img src={`data:image/png;base64,${member.imageUrl}`} className="w-full h-full object-cover" alt={member.name} />
+                            ) : (
+                               isNarratorMember ? <Mic size={24} className="text-zinc-500" /> : <User size={24} />
+                            )}
+                            
+                            {/* Hover Overlay - Hide for Narrator unless manually enabled? Let's hide to follow instruction */}
+                             {!isNarratorMember && (
+                               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                 <button 
+                                    onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
+                                    disabled={member.isGeneratingVisual}
+                                    className="text-white hover:text-indigo-400"
+                                 >
+                                    {member.isGeneratingVisual ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
+                                 </button>
+                               </div>
+                             )}
+                          </div>
+
+                          <div className="flex-1 min-w-0 space-y-2">
+                             <div>
+                                <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
+                                <p className="text-xs text-zinc-500 truncate">{member.description}</p>
+                             </div>
+                             
+                             <div className="flex items-center gap-2">
+                               <div className="flex-1">
+                                 <select 
+                                   value={member.voice} 
+                                   onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                                   className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-[10px] focus:outline-none"
+                                 >
+                                   {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                                 </select>
+                               </div>
+                             </div>
+                          </div>
+                       </div>
+
+                       {/* Visual Description Edit - Hide for Narrator */}
+                       {!isNarratorMember && (
+                         <div className="bg-zinc-950/50 rounded p-2 border border-zinc-800/50 space-y-2">
+                            <div className="flex items-center justify-between">
+                               <span className="text-[10px] text-zinc-500 font-semibold uppercase flex items-center gap-1">
+                                  <ImageIcon size={10} /> Visual Prompt
+                               </span>
+                               <button 
+                                  onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
+                                  disabled={member.isGeneratingVisual || !member.visualDescription}
+                                  className="text-[10px] bg-zinc-800 hover:bg-indigo-600 text-zinc-300 hover:text-white px-2 py-0.5 rounded transition-colors flex items-center gap-1"
+                               >
+                                  {member.isGeneratingVisual ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                                  Generate
+                               </button>
+                            </div>
+                            <textarea 
+                               value={member.visualDescription || ''}
+                               onChange={(e) => handleUpdateCast(member.name, { visualDescription: e.target.value })}
+                               className="w-full bg-transparent text-[11px] text-zinc-400 focus:text-zinc-200 focus:outline-none resize-none leading-tight h-12"
+                               placeholder="Describe character appearance..."
+                            />
+                         </div>
+                       )}
                     </div>
                   );
                 })}
              </div>
           </section>
-        )}
 
-      </main>
+          {/* Right Column: Script */}
+          <section className="lg:col-span-2 space-y-4">
+             <div className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-sm py-4 border-b border-zinc-800 flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <FileText size={18} className="text-indigo-400" /> Script ({state.items.length} cues)
+                </h2>
+                <div className="flex gap-2">
+                   {state.enableImages && (
+                      <button 
+                        onClick={handleGenerateAllSceneImages}
+                        disabled={isGeneratingImages}
+                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+                      >
+                        {isGeneratingImages ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
+                        Generate All Scenes
+                      </button>
+                   )}
+                   <button 
+                     onClick={handleGenerateAllAudio}
+                     disabled={isGeneratingAll}
+                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+                   >
+                     {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+                     Generate All Audio
+                   </button>
+                </div>
+             </div>
 
-      {/* Hidden Player orchestrator */}
+             <div className="space-y-4">
+                {state.items.map((item, index) => (
+                  <ScriptItemCard 
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    totalItems={state.items.length}
+                    assignedVoice={state.cast.find(c => c.name === item.character)?.voice}
+                    elevenLabsApiKey={state.elevenLabsApiKey}
+                    enableImages={state.enableImages}
+                    aspectRatio={state.aspectRatio}
+                    onUpdate={handleUpdateItem}
+                    onRemove={handleRemoveItem}
+                    onMove={handleMoveItem}
+                    onGenerateAudio={handleGenerateAudio}
+                    onGenerateSfx={handleGenerateSfx}
+                    onGenerateImage={handleGenerateItemImage}
+                    onPreviewAudio={(buffer) => {
+                      const ctx = getAudioContext();
+                      const source = ctx.createBufferSource();
+                      source.buffer = buffer;
+                      source.connect(ctx.destination);
+                      source.start();
+                    }}
+                    isPlaying={state.currentPlayingId === item.id}
+                  />
+                ))}
+             </div>
+          </section>
+
+        </main>
+      )}
+
+      {/* Persistent Footer Controls */}
+      {state.items.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 p-4 shadow-2xl z-50">
+           <div className="max-w-5xl mx-auto flex items-center justify-between">
+              
+              <div className="flex items-center gap-4">
+                 <button 
+                   onClick={togglePlay}
+                   className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                     state.isPlaying 
+                       ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
+                       : 'bg-emerald-500 text-black hover:bg-emerald-400 hover:scale-105'
+                   }`}
+                 >
+                   {state.isPlaying ? <Square size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+                 </button>
+                 <div>
+                    <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Now Playing</div>
+                    <div className="text-sm font-medium text-zinc-200">
+                       {state.currentPlayingId 
+                         ? `${state.items.findIndex(i => i.id === state.currentPlayingId) + 1}. ${state.items.find(i => i.id === state.currentPlayingId)?.type === 'speech' ? 'Dialogue' : 'SFX'}` 
+                         : 'Ready to start'}
+                    </div>
+                 </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                 <button 
+                   onClick={handleExportWav}
+                   disabled={isExporting}
+                   className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-medium transition-colors border border-zinc-700"
+                 >
+                   {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                   WAV
+                 </button>
+
+                 <button 
+                   onClick={handleExportVideo}
+                   disabled={isVideoExporting}
+                   className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg hover:shadow-indigo-500/25"
+                 >
+                   {isVideoExporting ? <Loader2 size={16} className="animate-spin" /> : <Video size={16} />}
+                   {isVideoExporting ? (videoExportProgress || 'Exporting...') : `Video (${state.aspectRatio})`}
+                 </button>
+              </div>
+
+           </div>
+        </div>
+      )}
+
       <Player 
-        items={state.items}
-        isPlaying={state.isPlaying}
-        onPlayStateChange={(isPlaying, currentId) => setState(prev => ({ ...prev, isPlaying, currentPlayingId: currentId }))}
+        items={state.items} 
+        isPlaying={state.isPlaying} 
+        onPlayStateChange={(playing, id) => setState(prev => ({ ...prev, isPlaying: playing, currentPlayingId: id }))} 
       />
+
     </div>
   );
 }

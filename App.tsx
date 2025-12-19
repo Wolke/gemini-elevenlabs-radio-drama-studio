@@ -475,6 +475,7 @@ export default function App() {
       const blob = await generateVideoFromScript(
         state.items,
         state.cast,
+        state.scenes,
         state.aspectRatio,
         (msg) => setVideoExportProgress(msg)
       );

@@ -30,12 +30,12 @@ export interface ScriptItem {
   location?: string; // Reference to SceneDefinition.name
   sfxDescription?: string;
   sfxSearchQuery?: string;
-  
+
   // Audio state
   audioBuffer?: AudioBuffer | null;
   isLoadingAudio?: boolean;
   generationError?: string; // Capture API errors here
-  
+
   // Image state
   imageUrl?: string; // Base64 scene image
   isGeneratingVisual?: boolean;
@@ -61,13 +61,14 @@ export interface DramaState {
   isGeneratingScript: boolean;
   isPlaying: boolean;
   currentPlayingId: string | null;
-  
+
   // Configuration
   enableSfx: boolean;
-  includeNarrator: boolean; 
-  enableImages: boolean; 
-  imageStyle: string; 
-  aspectRatio: AspectRatio; 
+  includeNarrator: boolean;
+  enableImages: boolean;
+  imageStyle: string;
+  aspectRatio: AspectRatio;
+  geminiApiKey: string;
   elevenLabsApiKey: string;
   useElevenLabsForSpeech: boolean;
 }

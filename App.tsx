@@ -46,6 +46,7 @@ export default function App() {
     enableImages: true,
     imageStyle: "Cinematic Realistic",
     aspectRatio: "16:9",
+    geminiApiKey: '',
     elevenLabsApiKey: '',
     useElevenLabsForSpeech: false,
   });
@@ -78,7 +79,7 @@ export default function App() {
 
     try {
       // 1. Generate Script text with Narrator flag
-      const { cast, scenes, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator);
+      const { cast, scenes, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator, state.geminiApiKey);
 
       // Update state immediately with text
       setState(prev => ({ ...prev, cast, scenes, items, isGeneratingScript: false }));
@@ -160,7 +161,7 @@ export default function App() {
 
     try {
       const finalStyle = customStyle || state.imageStyle;
-      const b64 = await generateCharacterSheet(description, finalStyle);
+      const b64 = await generateCharacterSheet(description, finalStyle, state.geminiApiKey);
 
       setState(prev => ({
         ...prev,
@@ -184,7 +185,7 @@ export default function App() {
     try {
       const finalStyle = customStyle || state.imageStyle;
       // Master scenes are just empty backgrounds
-      const b64 = await generateSceneImage(description, finalStyle, state.aspectRatio);
+      const b64 = await generateSceneImage(description, finalStyle, state.aspectRatio, undefined, undefined, state.geminiApiKey);
 
       setState(prev => ({
         ...prev,
@@ -282,7 +283,7 @@ export default function App() {
         const base64 = await generateElevenLabsSpeech(text, voice, state.elevenLabsApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else {
-        const base64 = await generateSpeech(text, voice, expression);
+        const base64 = await generateSpeech(text, voice, expression, state.geminiApiKey);
         buffer = await decodeRawPCM(base64, ctx);
       }
 
@@ -388,7 +389,7 @@ export default function App() {
       }
 
       const finalStyle = customStyle || state.imageStyle;
-      const b64 = await generateSceneImage(finalPrompt, finalStyle, state.aspectRatio, refImage, refType);
+      const b64 = await generateSceneImage(finalPrompt, finalStyle, state.aspectRatio, refImage, refType, state.geminiApiKey);
 
       handleUpdateItem(id, { imageUrl: b64, isGeneratingVisual: false });
     } catch (e: any) {
@@ -744,6 +745,27 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Gemini API Key */}
+                <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-md">
+                      <Key size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Gemini API Key</p>
+                      <p className="text-xs text-zinc-500">Required for AI generation</p>
+                    </div>
+                  </div>
+                  <input
+                    type="password"
+                    placeholder="Enter your Gemini API Key..."
+                    value={state.geminiApiKey}
+                    onChange={(e) => setState(prev => ({ ...prev, geminiApiKey: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-xs text-zinc-600">Leave empty to use environment variable (API_KEY)</p>
+                </div>
+
                 {/* ElevenLabs Config */}
                 <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-3">
                   <div className="flex items-center justify-between">
@@ -944,8 +966,8 @@ export default function App() {
                     onClick={handleGenerateAllSceneImages}
                     disabled={isGeneratingImages || !allCastReady}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-2 ${allCastReady
-                        ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
-                        : 'bg-zinc-900 text-zinc-600 cursor-not-allowed border border-zinc-800'
+                      ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                      : 'bg-zinc-900 text-zinc-600 cursor-not-allowed border border-zinc-800'
                       }`}
                     title={!allCastReady ? "Generate all character portraits first" : ""}
                   >
@@ -1011,8 +1033,8 @@ export default function App() {
               <button
                 onClick={togglePlay}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${state.isPlaying
-                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                    : 'bg-emerald-500 text-black hover:bg-emerald-400 hover:scale-105'
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                  : 'bg-emerald-500 text-black hover:bg-emerald-400 hover:scale-105'
                   }`}
               >
                 {state.isPlaying ? <Square size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}

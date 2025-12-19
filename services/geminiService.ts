@@ -2,9 +2,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ItemType, ScriptItem, CastMember, SceneDefinition, AspectRatio } from "../types";
 
-// Initialize Gemini Client
-// NOTE: In a real app, ensure API_KEY is set in environment
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Helper to get or create Gemini client
+// Priority: provided apiKey > environment variable
+const getAI = (apiKey?: string): GoogleGenAI => {
+  const key = apiKey || process.env.API_KEY || '';
+  if (!key) {
+    throw new Error("Gemini API Key is required. Please enter it in Settings or set API_KEY environment variable.");
+  }
+  return new GoogleGenAI({ apiKey: key });
+};
 
 interface GeneratedScriptResponse {
   cast: CastMember[];
@@ -13,20 +19,22 @@ interface GeneratedScriptResponse {
 }
 
 const ALL_VOICES = [
-  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
-  "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe", 
-  "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", 
-  "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", 
-  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", 
+  "Zephyr", "Puck", "Charon", "Kore", "Fenrir",
+  "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+  "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina",
+  "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
   "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
 ];
 
 export const generateScriptFromStory = async (
-  story: string, 
+  story: string,
   includeSfx: boolean = true,
-  includeNarrator: boolean = true
+  includeNarrator: boolean = true,
+  apiKey?: string
 ): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[] }> => {
   if (!story.trim()) return { cast: [], scenes: [], items: [] };
+  const ai = getAI(apiKey);
 
   let sfxInstructions = "";
   if (includeSfx) {
@@ -151,7 +159,7 @@ export const generateScriptFromStory = async (
     if (!jsonText) throw new Error("No response text from Gemini");
 
     const data = JSON.parse(jsonText) as GeneratedScriptResponse;
-    
+
     // Process Scenes
     const scenes: SceneDefinition[] = (data.scenes || []).map(s => ({
       id: crypto.randomUUID(),
@@ -175,9 +183,10 @@ export const generateScriptFromStory = async (
   }
 };
 
-export const generateSpeech = async (text: string, voiceName: string = 'Puck', expression: string = ''): Promise<string> => {
+export const generateSpeech = async (text: string, voiceName: string = 'Puck', expression: string = '', apiKey?: string): Promise<string> => {
+  const ai = getAI(apiKey);
   const textPrompt = expression ? `Say ${expression}: ${text}` : text;
-  
+
   console.log("--- [Gemini] Generate Speech Prompt ---");
   console.log(`Voice: ${voiceName}`);
   console.log(`Text: ${textPrompt}`);
@@ -208,7 +217,8 @@ export const generateSpeech = async (text: string, voiceName: string = 'Puck', e
 /**
  * Base function for generating images
  */
-const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, referenceImageBase64?: string): Promise<string> => {
+const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, referenceImageBase64?: string, apiKey?: string): Promise<string> => {
+  const ai = getAI(apiKey);
   console.log("--- [Gemini] Generate Image Prompt ---");
   console.log(prompt);
   if (referenceImageBase64) console.log("[Attached Reference Image Data]");
@@ -216,7 +226,7 @@ const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, refere
 
   try {
     const parts: any[] = [];
-    
+
     // If we have a reference image, add it first
     if (referenceImageBase64) {
       parts.push({
@@ -260,7 +270,7 @@ const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, refere
 /**
  * Generates a "Character Sheet" (Front, Side, Full Body)
  */
-export const generateCharacterSheet = async (description: string, style: string): Promise<string> => {
+export const generateCharacterSheet = async (description: string, style: string, apiKey?: string): Promise<string> => {
   const prompt = `
     Character sheet design, ${style} style.
     Character description: ${description}.
@@ -272,7 +282,7 @@ export const generateCharacterSheet = async (description: string, style: string)
     - Clean lines, high detail.
   `;
   // Force 16:9 for character sheets to fit the 3 views comfortably
-  return generateRawImage(prompt, "16:9"); 
+  return generateRawImage(prompt, "16:9", undefined, apiKey);
 };
 
 /**
@@ -281,11 +291,12 @@ export const generateCharacterSheet = async (description: string, style: string)
  *                        'scene' means the reference is a background/environment (maintain scene style)
  */
 export const generateSceneImage = async (
-  description: string, 
-  style: string, 
-  aspectRatio: AspectRatio, 
+  description: string,
+  style: string,
+  aspectRatio: AspectRatio,
   referenceImageBase64?: string,
-  referenceType?: 'character' | 'scene'
+  referenceType?: 'character' | 'scene',
+  apiKey?: string
 ): Promise<string> => {
   let prompt = `
     ${style} style.
@@ -296,7 +307,7 @@ export const generateSceneImage = async (
     - Strong atmosphere and lighting.
     - Focus on the scene composition.
   `;
-  
+
   if (referenceImageBase64) {
     if (referenceType === 'character') {
       prompt += `
@@ -320,5 +331,5 @@ export const generateSceneImage = async (
     }
   }
 
-  return generateRawImage(prompt, aspectRatio, referenceImageBase64);
+  return generateRawImage(prompt, aspectRatio, referenceImageBase64, apiKey);
 };

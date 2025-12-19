@@ -277,12 +277,15 @@ export const generateCharacterSheet = async (description: string, style: string)
 
 /**
  * Generates a Scene/Dialogue Image
+ * @param referenceType - 'character' means the reference is a character portrait (maintain character appearance),
+ *                        'scene' means the reference is a background/environment (maintain scene style)
  */
 export const generateSceneImage = async (
   description: string, 
   style: string, 
   aspectRatio: AspectRatio, 
-  referenceImageBase64?: string
+  referenceImageBase64?: string,
+  referenceType?: 'character' | 'scene'
 ): Promise<string> => {
   let prompt = `
     ${style} style.
@@ -295,9 +298,26 @@ export const generateSceneImage = async (
   `;
   
   if (referenceImageBase64) {
-    prompt += `
-    - IMPORTANT: Use the provided image as the exact visual reference.
+    if (referenceType === 'character') {
+      prompt += `
+    CRITICAL CHARACTER CONSISTENCY INSTRUCTIONS:
+    - The attached image is a CHARACTER REFERENCE SHEET showing the character's appearance.
+    - You MUST maintain the EXACT same character design: face shape, eye color, hair style, hair color, skin tone, clothing, and all distinguishing features.
+    - The character in the generated scene MUST look like the SAME PERSON as in the reference image.
+    - Draw this specific character performing the action described in the scene.
+    - Do NOT change the character's appearance or design in any way.
     `;
+    } else if (referenceType === 'scene') {
+      prompt += `
+    - IMPORTANT: Use the provided image as the visual reference for the ENVIRONMENT and BACKGROUND STYLE.
+    - Maintain consistency with the scene's atmosphere, lighting, and architectural elements.
+    `;
+    } else {
+      // Fallback for backward compatibility
+      prompt += `
+    - IMPORTANT: Use the provided image as a visual reference.
+    `;
+    }
   }
 
   return generateRawImage(prompt, aspectRatio, referenceImageBase64);

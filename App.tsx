@@ -333,37 +333,55 @@ export default function App() {
       if (!item) return;
 
       let refImage = undefined;
-      let fullPrompt = basePrompt;
+      let finalPrompt = basePrompt;
 
       // 1. Find the Location (Scene) definition
       const sceneDef = state.scenes.find(s => s.name === item.location);
       
-      // 2. Augment prompt with scene visual description for consistency
-      if (sceneDef) {
-         fullPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
-      }
-      
-      // 3. Determine Reference Image strategy
-      // Priority: Character Consistency for Dialogue, Scene Consistency for SFX/Narrator
+      // 2. Determine Reference Image & Context Strategy
       
       const isSpeech = item.type === ItemType.SPEECH;
       const isNarratorLine = item.character && isNarrator(item.character);
       
       if (isSpeech && !isNarratorLine) {
-        // For Dialogue: Use Character Portrait as reference
+        // --- CASE 1: Character Dialogue ---
+        // Reference: Character Portrait (to keep character consistent)
         const member = state.cast.find(c => c.name === item.character);
         if (member && member.imageUrl) {
           refImage = member.imageUrl;
         }
+        
+        // Prompt: We MUST include scene details here because the Reference Image (Portrait) 
+        // usually has a neutral background. We need to tell the model to put this character 
+        // into the specific scene environment.
+        if (sceneDef) {
+           finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
+        }
+
       } else {
-        // For SFX or Narrator: Use Master Scene Image as reference (if available)
+        // --- CASE 2: Narrator or SFX ---
+        // Reference: Master Scene Image (to keep environment consistent)
         if (sceneDef && sceneDef.imageUrl) {
            refImage = sceneDef.imageUrl;
+        }
+
+        // Prompt Logic:
+        // If we represent the scene using the reference image, we suppress the textual environment description
+        // to prioritize the "Action/Event" description in basePrompt.
+        if (refImage) {
+           // We have the visual reference for the environment, so we don't textually describe it again.
+           // finalPrompt only contains the Action/Event from basePrompt.
+        } else {
+           // No reference image (first generation or missing). 
+           // We need textual description to generate the background.
+           if (sceneDef) {
+              finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
+           }
         }
       }
 
       const finalStyle = customStyle || state.imageStyle;
-      const b64 = await generateSceneImage(fullPrompt, finalStyle, state.aspectRatio, refImage);
+      const b64 = await generateSceneImage(finalPrompt, finalStyle, state.aspectRatio, refImage);
       
       handleUpdateItem(id, { imageUrl: b64, isGeneratingVisual: false });
     } catch (e: any) {

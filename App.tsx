@@ -333,29 +333,52 @@ export default function App() {
       const item = state.items.find(i => i.id === id);
       if (!item) return;
 
-      let characterRef: string | undefined = undefined;
       let sceneRef: string | undefined = undefined;
       let finalPrompt = basePrompt;
 
       // 1. Find the Location (Scene) definition
       const sceneDef = state.scenes.find(s => s.name === item.location);
 
-      // 2. Determine Reference Images
+      // 2. Find ALL characters mentioned in this item
+      // Get the text content to analyze
+      const textToAnalyze = item.text || item.sfxDescription || basePrompt;
+
+      // Find all characters that are mentioned in the text (excluding narrators)
+      const mentionedCharacters = state.cast.filter(c => {
+        if (isNarrator(c.name)) return false; // Skip narrators
+        if (!c.imageUrl) return false; // Skip characters without images
+        // Check if character name appears in the text
+        return textToAnalyze.includes(c.name);
+      });
+
+      // For non-narrator speech, always include the speaking character
       const isSpeech = item.type === ItemType.SPEECH;
       const isNarratorLine = item.character && isNarrator(item.character);
 
-      // Get character reference for non-narrator speech
-      if (isSpeech && !isNarratorLine) {
-        const member = state.cast.find(c => c.name === item.character);
-        if (member && member.imageUrl) {
-          characterRef = member.imageUrl;
-          console.log(`[Image Gen] Using character reference for: ${item.character}`);
-        } else {
-          console.log(`[Image Gen] No character image found for: ${item.character}`);
+      if (isSpeech && !isNarratorLine && item.character) {
+        const speakingChar = state.cast.find(c => c.name === item.character);
+        if (speakingChar && speakingChar.imageUrl) {
+          // Add speaking character if not already in list
+          const alreadyIncluded = mentionedCharacters.some(c => c.name === speakingChar.name);
+          if (!alreadyIncluded) {
+            mentionedCharacters.unshift(speakingChar); // Add to beginning
+          }
         }
       }
 
-      // Get scene reference for all items (if available)
+      // Build character references array
+      const characterRefs: { name: string; base64: string }[] = mentionedCharacters.map(c => ({
+        name: c.name,
+        base64: c.imageUrl!
+      }));
+
+      if (characterRefs.length > 0) {
+        console.log(`[Image Gen] Using ${characterRefs.length} character reference(s): ${characterRefs.map(c => c.name).join(', ')}`);
+      } else {
+        console.log(`[Image Gen] No character references found for this item`);
+      }
+
+      // 3. Get scene reference (if available)
       if (sceneDef && sceneDef.imageUrl) {
         sceneRef = sceneDef.imageUrl;
         console.log(`[Image Gen] Using scene reference for location: ${sceneDef.name}`);
@@ -368,13 +391,13 @@ export default function App() {
 
       const finalStyle = customStyle || state.imageStyle;
 
-      // Pass both character and scene references
+      // Pass all character references and scene reference
       const b64 = await generateSceneImage(
         finalPrompt,
         finalStyle,
         state.aspectRatio,
-        characterRef,    // Character reference (optional)
-        sceneRef,        // Scene reference (optional)
+        characterRefs.length > 0 ? characterRefs : undefined,
+        sceneRef,
         state.geminiApiKey
       );
 

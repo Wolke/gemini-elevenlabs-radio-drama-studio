@@ -305,15 +305,23 @@ export const generateCharacterSheet = async (description: string, style: string,
 };
 
 /**
- * Generates a Scene/Dialogue Image with support for both character and scene references
- * @param characterRefBase64 - Character reference sheet image (to maintain character appearance)
+ * Character reference with name for identification
+ */
+export interface CharacterReference {
+  name: string;
+  base64: string;
+}
+
+/**
+ * Generates a Scene/Dialogue Image with support for multiple character references and scene reference
+ * @param characterRefs - Array of character reference images (to maintain character appearances)
  * @param sceneRefBase64 - Scene/background reference image (to maintain environment consistency)
  */
 export const generateSceneImage = async (
   description: string,
   style: string,
   aspectRatio: AspectRatio,
-  characterRefBase64?: string,
+  characterRefs?: CharacterReference[],
   sceneRefBase64?: string,
   apiKey?: string
 ): Promise<string> => {
@@ -321,13 +329,17 @@ export const generateSceneImage = async (
   // Build reference images array
   const refImages: ReferenceImage[] = [];
 
-  if (characterRefBase64) {
-    refImages.push({
-      base64: characterRefBase64,
-      label: "CHARACTER_REFERENCE_SHEET"
-    });
+  // Add all character references
+  if (characterRefs && characterRefs.length > 0) {
+    for (const charRef of characterRefs) {
+      refImages.push({
+        base64: charRef.base64,
+        label: `CHARACTER_REFERENCE: ${charRef.name}`
+      });
+    }
   }
 
+  // Add scene reference
   if (sceneRefBase64) {
     refImages.push({
       base64: sceneRefBase64,
@@ -346,15 +358,18 @@ export const generateSceneImage = async (
     - Focus on the scene composition.
   `;
 
-  // Add character consistency instructions if we have a character reference
-  if (characterRefBase64) {
+  // Add character consistency instructions if we have character references
+  if (characterRefs && characterRefs.length > 0) {
+    const charNames = characterRefs.map(c => c.name).join(', ');
     prompt += `
     CRITICAL CHARACTER CONSISTENCY INSTRUCTIONS:
-    - The image labeled "CHARACTER_REFERENCE_SHEET" shows the character's appearance.
-    - You MUST maintain the EXACT same character design: face shape, eye color, hair style, hair color, skin tone, clothing, and all distinguishing features.
-    - The character in the generated scene MUST look like the SAME PERSON as in the character reference.
-    - Draw this specific character performing the action described in the scene.
-    - Do NOT change the character's appearance or design in any way.
+    - You are provided with ${characterRefs.length} character reference image(s) for: ${charNames}.
+    - Each character reference is labeled with "CHARACTER_REFERENCE: [Name]".
+    - You MUST maintain the EXACT same appearance for each character: face shape, eye color, hair style, hair color, skin tone, clothing, and all distinguishing features.
+    - Each character in the generated scene MUST look like the EXACT SAME PERSON as shown in their respective reference image.
+    - Draw these specific characters performing the actions described in the scene.
+    - Do NOT change any character's appearance or design in any way.
+    - DO NOT combine or merge character features.
     `;
   }
 

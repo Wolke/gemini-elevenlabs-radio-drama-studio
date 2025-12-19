@@ -83,6 +83,10 @@ export const generateScriptFromStory = async (
     "${story}"
   `;
 
+  console.log("--- [Gemini] Generate Script Prompt ---");
+  console.log(prompt);
+  console.log("---------------------------------------");
+
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -148,6 +152,12 @@ export const generateScriptFromStory = async (
 
 export const generateSpeech = async (text: string, voiceName: string = 'Puck', expression: string = ''): Promise<string> => {
   const textPrompt = expression ? `Say ${expression}: ${text}` : text;
+  
+  console.log("--- [Gemini] Generate Speech Prompt ---");
+  console.log(`Voice: ${voiceName}`);
+  console.log(`Text: ${textPrompt}`);
+  console.log("---------------------------------------");
+
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
@@ -174,6 +184,11 @@ export const generateSpeech = async (text: string, voiceName: string = 'Puck', e
  * Base function for generating images
  */
 const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, referenceImageBase64?: string): Promise<string> => {
+  console.log("--- [Gemini] Generate Image Prompt ---");
+  console.log(prompt);
+  if (referenceImageBase64) console.log("[Attached Reference Image Data]");
+  console.log("--------------------------------------");
+
   try {
     const parts: any[] = [];
     
@@ -219,11 +234,6 @@ const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, refere
 
 /**
  * Generates a "Character Sheet" (Front, Side, Full Body)
- * This is always generated in 16:9 to fit all views horizontally, 
- * regardless of the main app aspect ratio setting, usually.
- * But to support the "Mobile" request, we might stick to the requested ratio 
- * or default to 16:9 for sheets as they need horizontal space.
- * Let's force 16:9 for Character Sheets as they are reference materials.
  */
 export const generateCharacterSheet = async (description: string, style: string): Promise<string> => {
   const prompt = `

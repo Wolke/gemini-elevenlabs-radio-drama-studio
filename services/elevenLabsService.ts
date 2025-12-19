@@ -1,3 +1,4 @@
+
 // Service for interacting with ElevenLabs API
 
 // Mapping of some Gemini archetype vibes to ElevenLabs Pre-made Voice IDs
@@ -34,6 +35,11 @@ export const generateElevenLabsSfx = async (
   durationSeconds: number = 4, 
   apiKey: string
 ): Promise<string> => {
+  
+  console.log("--- [ElevenLabs] Generate SFX Prompt ---");
+  console.log(text);
+  console.log("----------------------------------------");
+
   // POST https://api.elevenlabs.io/v1/sound-generation
   const response = await fetch('https://api.elevenlabs.io/v1/sound-generation', {
     method: 'POST',
@@ -66,6 +72,11 @@ export const generateElevenLabsSpeech = async (
 ): Promise<string> => {
   const voiceId = getVoiceId(geminiVoiceName);
   
+  console.log("--- [ElevenLabs] Generate Speech Prompt ---");
+  console.log(`Text: ${text}`);
+  console.log(`Voice ID: ${voiceId} (mapped from ${geminiVoiceName})`);
+  console.log("-------------------------------------------");
+
   // POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: 'POST',

@@ -129,9 +129,21 @@ export default function App() {
     for (const item of itemsToProcess) {
        // Re-use logic from single item generation to ensure consistency
        // This will look up item.location and use that scene description/image
-       const prompt = item.type === ItemType.SPEECH 
-          ? `${item.expression || 'dramatic'} mood, ${item.character} speaking` 
-          : `${item.sfxDescription}`;
+       let prompt = "";
+       if (item.type === ItemType.SPEECH) {
+          // Include text content to capture actions/context described in dialogue or narration
+          const content = item.text || "";
+          if (item.character && isNarrator(item.character)) {
+             // For Narrator, the text contains the action description
+             prompt = `Visual event: "${content}". Atmosphere: ${item.expression || 'dramatic'}`;
+          } else {
+             // For characters, focus on their presence + dialogue context
+             prompt = `Character: ${item.character}. Action/Context derived from dialogue: "${content}". Expression: ${item.expression || 'dramatic'}`;
+          }
+       } else {
+          // SFX
+          prompt = `Visual representation of sound effect: "${item.sfxDescription}"`;
+       }
        
        await handleGenerateItemImage(item.id, prompt);
        await new Promise(r => setTimeout(r, 2000));
@@ -203,9 +215,6 @@ export default function App() {
     reader.onload = (event) => {
       const result = event.target?.result as string;
       // Extract base64 data (remove "data:image/xxx;base64," prefix for consistency with generated images)
-      // Gemini API returns raw base64, but for display we usually add prefix.
-      // However, App state `imageUrl` is expected to be raw base64 in some helper functions (like videoUtils logic checking for 'data:').
-      // Let's store raw base64 to match `geminiService` output.
       let base64Data = result;
       if (result.includes(',')) {
         base64Data = result.split(',')[1];

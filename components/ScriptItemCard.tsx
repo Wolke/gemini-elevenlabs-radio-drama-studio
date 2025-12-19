@@ -260,8 +260,10 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
                       onClick={() => onGenerateImage(
                         item.id, 
                         item.type === ItemType.SPEECH 
-                          ? `${item.expression || 'dramatic'} mood, ${item.character} speaking` 
-                          : `${item.sfxDescription}`
+                          ? (isNarratorCharacter 
+                              ? `Visual event: "${item.text}". Atmosphere: ${item.expression || 'dramatic'}`
+                              : `Character: ${item.character}. Action/Context derived from dialogue: "${item.text}". Expression: ${item.expression || 'dramatic'}`)
+                          : `Visual representation of sound effect: "${item.sfxDescription}"`
                       )}
                       disabled={item.isGeneratingVisual || isDisabled}
                       className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${

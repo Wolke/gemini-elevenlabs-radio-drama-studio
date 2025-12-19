@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ItemType, ScriptItem, CastMember, AspectRatio } from "../types";
+import { ItemType, ScriptItem, CastMember, SceneDefinition, AspectRatio } from "../types";
 
 // Initialize Gemini Client
 // NOTE: In a real app, ensure API_KEY is set in environment
@@ -8,6 +8,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
 interface GeneratedScriptResponse {
   cast: CastMember[];
+  scenes: { name: string; visualDescription: string }[];
   script: any[];
 }
 
@@ -24,8 +25,8 @@ export const generateScriptFromStory = async (
   story: string, 
   includeSfx: boolean = true,
   includeNarrator: boolean = true
-): Promise<{ cast: CastMember[], items: ScriptItem[] }> => {
-  if (!story.trim()) return { cast: [], items: [] };
+): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[] }> => {
+  if (!story.trim()) return { cast: [], scenes: [], items: [] };
 
   let sfxInstructions = "";
   if (includeSfx) {
@@ -57,27 +58,31 @@ export const generateScriptFromStory = async (
 
   const prompt = `
     You are an expert radio drama scriptwriter and director. 
-    Convert the following story into a detailed radio drama script with a cast list and a sequence of cues.
+    Convert the following story into a detailed radio drama script with a cast list, a list of scenes (locations), and a sequence of cues.
     
     **LANGUAGE INSTRUCTION**: 
     - The 'text' (dialogue) field MUST be in the SAME LANGUAGE as the input story. 
-    - The 'expression' field MUST ALWAYS be in ENGLISH.
-    - The 'visualDescription' for characters MUST be in ENGLISH (detailed physical appearance for image generation).
+    - The 'expression', 'visualDescription' (for cast), and 'visualDescription' (for scenes) fields MUST ALWAYS be in ENGLISH.
 
     **INSTRUCTIONS**:
     1. **Cast**: Identify all characters. 
        - Assign a voice.
-       - Provide a 'visualDescription': A concise but evocative physical description (e.g., "A grizzled cyber-noir detective with a neon-lit trench coat").
+       - Provide a 'visualDescription': A concise but evocative physical description.
        ${narratorInstructions}
-       
-    2. **Script**: A list of cues.
+
+    2. **Scenes**: Identify the key locations/environments in the story.
+       - Provide a 'name' (e.g., "Living Room", "Forest at Night").
+       - Provide a 'visualDescription' (ENGLISH): Detailed atmospheric description for an image generator (lighting, colors, mood).
+
+    3. **Script**: A list of cues.
+       - 'location': The name of the scene where this cue takes place (MUST match a name from the Scenes list).
        - For 'speech':
          - 'character': Name from the cast list.
          - 'text': The dialogue (IN THE STORY'S LANGUAGE).
          - 'expression': A direction for HOW it should be spoken (IN ENGLISH).
        ${sfxInstructions}
 
-    Return a JSON object with keys "cast" and "script".
+    Return a JSON object with keys "cast", "scenes", and "script".
 
     Story:
     "${story}"
@@ -109,23 +114,35 @@ export const generateScriptFromStory = async (
                 required: ["name", "voice", "visualDescription"]
               }
             },
+            scenes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  visualDescription: { type: Type.STRING, description: "Detailed environment description" }
+                },
+                required: ["name", "visualDescription"]
+              }
+            },
             script: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
                 properties: {
                   type: { type: Type.STRING, enum: [ItemType.SPEECH, ItemType.SFX] },
+                  location: { type: Type.STRING },
                   character: { type: Type.STRING },
                   text: { type: Type.STRING },
                   expression: { type: Type.STRING },
                   sfxDescription: { type: Type.STRING },
                   sfxSearchQuery: { type: Type.STRING },
                 },
-                required: ["type"],
+                required: ["type", "location"],
               },
             }
           },
-          required: ["cast", "script"]
+          required: ["cast", "scenes", "script"]
         },
       },
     });
@@ -135,6 +152,14 @@ export const generateScriptFromStory = async (
 
     const data = JSON.parse(jsonText) as GeneratedScriptResponse;
     
+    // Process Scenes
+    const scenes: SceneDefinition[] = (data.scenes || []).map(s => ({
+      id: crypto.randomUUID(),
+      name: s.name,
+      visualDescription: s.visualDescription
+    }));
+
+    // Process Script Items
     const items = data.script.map((item: any) => ({
       ...item,
       id: crypto.randomUUID(),
@@ -142,7 +167,7 @@ export const generateScriptFromStory = async (
       youtubeStartTime: 0,
     }));
 
-    return { cast: data.cast, items };
+    return { cast: data.cast, scenes, items };
 
   } catch (error) {
     console.error("Error generating script:", error);
@@ -271,7 +296,7 @@ export const generateSceneImage = async (
   
   if (referenceImageBase64) {
     prompt += `
-    - IMPORTANT: Use the provided image as the exact character reference. Maintain facial features, hair, and costume details.
+    - IMPORTANT: Use the provided image as the exact visual reference.
     `;
   }
 

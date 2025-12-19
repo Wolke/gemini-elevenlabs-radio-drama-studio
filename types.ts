@@ -13,12 +13,21 @@ export interface CastMember {
   isGeneratingVisual?: boolean; // UI loading state
 }
 
+export interface SceneDefinition {
+  id: string;
+  name: string;
+  visualDescription: string;
+  imageUrl?: string;
+  isGeneratingVisual?: boolean;
+}
+
 export interface ScriptItem {
   id: string;
   type: ItemType;
   character?: string;
   text?: string;
   expression?: string; // e.g., "excited", "whispering"
+  location?: string; // Reference to SceneDefinition.name
   sfxDescription?: string;
   sfxSearchQuery?: string;
   
@@ -47,6 +56,7 @@ export type AspectRatio = '16:9' | '9:16';
 export interface DramaState {
   storyText: string;
   cast: CastMember[];
+  scenes: SceneDefinition[]; // New: List of locations
   items: ScriptItem[];
   isGeneratingScript: boolean;
   isPlaying: boolean;
@@ -54,9 +64,9 @@ export interface DramaState {
   
   // Configuration
   enableSfx: boolean;
-  includeNarrator: boolean; // New config to toggle Narrator presence
-  enableImages: boolean; // New config
-  imageStyle: string; // e.g. "Watercolor", "Cyberpunk"
+  includeNarrator: boolean; 
+  enableImages: boolean; 
+  imageStyle: string; 
   aspectRatio: AspectRatio; 
   elevenLabsApiKey: string;
   useElevenLabsForSpeech: boolean;

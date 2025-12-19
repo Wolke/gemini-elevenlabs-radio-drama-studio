@@ -1,13 +1,13 @@
 
 import React, { useState, useRef } from 'react';
-import { DramaState, ItemType, ScriptItem, CastMember } from './types';
+import { DramaState, ItemType, ScriptItem, CastMember, SceneDefinition } from './types';
 import { generateScriptFromStory, generateSpeech, generateCharacterSheet, generateSceneImage } from './services/geminiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech } from './services/elevenLabsService';
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
 import { generateVideoFromScript } from './utils/videoUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload, ImageIcon, Video, RefreshCw, Pencil, Palette, Smartphone, Monitor, ImagePlus, Mic, Mic2 } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload, ImageIcon, Video, RefreshCw, Pencil, Palette, Smartphone, Monitor, ImagePlus, Mic, Mic2, MapPin } from 'lucide-react';
 
 const VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
@@ -36,6 +36,7 @@ export default function App() {
   const [state, setState] = useState<DramaState>({
     storyText: '',
     cast: [],
+    scenes: [],
     items: [],
     isGeneratingScript: false,
     isPlaying: false,
@@ -75,14 +76,11 @@ export default function App() {
     
     try {
       // 1. Generate Script text with Narrator flag
-      const { cast, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator);
+      const { cast, scenes, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator);
       
       // Update state immediately with text
-      setState(prev => ({ ...prev, cast, items, isGeneratingScript: false }));
+      setState(prev => ({ ...prev, cast, scenes, items, isGeneratingScript: false }));
       setIsConfigExpanded(false);
-
-      // Auto-generation of character images is DISABLED per user request.
-      // Users can now click "Generate All Portraits" manually.
 
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
@@ -102,9 +100,7 @@ export default function App() {
     );
 
     for (const member of membersToProcess) {
-      // Check if we are still processing (in case user clears project mid-way, though unlikely with async loop)
       await handleGenerateCastImage(member.name, member.visualDescription!);
-      // Small delay to be polite to API rate limits
       await new Promise(r => setTimeout(r, 1500)); 
     }
     
@@ -125,19 +121,17 @@ export default function App() {
     const itemsToProcess = state.items.filter(item => {
       // Skip if already has image
       if (item.imageUrl) return false;
-      return true; // Process all items that don't have images (Speech AND SFX)
+      return true; 
     });
 
     for (const item of itemsToProcess) {
-       let prompt = "";
-       if (item.type === ItemType.SPEECH) {
-          prompt = `${item.expression || 'dramatic'} mood, ${item.character} speaking`;
-       } else {
-          prompt = item.sfxDescription || "Scene";
-       }
+       // Re-use logic from single item generation to ensure consistency
+       // This will look up item.location and use that scene description/image
+       const prompt = item.type === ItemType.SPEECH 
+          ? `${item.expression || 'dramatic'} mood, ${item.character} speaking` 
+          : `${item.sfxDescription}`;
        
        await handleGenerateItemImage(item.id, prompt);
-       // Delay for rate limits
        await new Promise(r => setTimeout(r, 2000));
     }
     setIsGeneratingImages(false);
@@ -151,7 +145,6 @@ export default function App() {
     }));
 
     try {
-      // Use the new generateCharacterSheet function
       const finalStyle = customStyle || state.imageStyle;
       const b64 = await generateCharacterSheet(description, finalStyle);
       
@@ -164,6 +157,30 @@ export default function App() {
       setState(prev => ({
         ...prev,
         cast: prev.cast.map(c => c.name === name ? { ...c, isGeneratingVisual: false } : c)
+      }));
+    }
+  };
+
+  const handleGenerateMasterSceneImage = async (sceneName: string, description: string) => {
+    setState(prev => ({
+      ...prev,
+      scenes: prev.scenes.map(s => s.name === sceneName ? { ...s, isGeneratingVisual: true } : s)
+    }));
+
+    try {
+      const finalStyle = customStyle || state.imageStyle;
+      // Master scenes are just empty backgrounds
+      const b64 = await generateSceneImage(description, finalStyle, state.aspectRatio);
+      
+      setState(prev => ({
+        ...prev,
+        scenes: prev.scenes.map(s => s.name === sceneName ? { ...s, imageUrl: b64, isGeneratingVisual: false } : s)
+      }));
+    } catch (e) {
+       console.error(e);
+       setState(prev => ({
+        ...prev,
+        scenes: prev.scenes.map(s => s.name === sceneName ? { ...s, isGeneratingVisual: false } : s)
       }));
     }
   };
@@ -253,23 +270,44 @@ export default function App() {
     }
   };
 
-  const handleGenerateItemImage = async (id: string, prompt: string) => {
+  const handleGenerateItemImage = async (id: string, basePrompt: string) => {
     handleUpdateItem(id, { isGeneratingVisual: true });
     try {
       const item = state.items.find(i => i.id === id);
+      if (!item) return;
+
       let refImage = undefined;
+      let fullPrompt = basePrompt;
+
+      // 1. Find the Location (Scene) definition
+      const sceneDef = state.scenes.find(s => s.name === item.location);
       
-      // Find character reference image for consistency
-      // Exclude Narrator from reference logic
-      if (item && item.character && !isNarrator(item.character)) {
+      // 2. Augment prompt with scene visual description for consistency
+      if (sceneDef) {
+         fullPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
+      }
+      
+      // 3. Determine Reference Image strategy
+      // Priority: Character Consistency for Dialogue, Scene Consistency for SFX/Narrator
+      
+      const isSpeech = item.type === ItemType.SPEECH;
+      const isNarratorLine = item.character && isNarrator(item.character);
+      
+      if (isSpeech && !isNarratorLine) {
+        // For Dialogue: Use Character Portrait as reference
         const member = state.cast.find(c => c.name === item.character);
         if (member && member.imageUrl) {
           refImage = member.imageUrl;
         }
+      } else {
+        // For SFX or Narrator: Use Master Scene Image as reference (if available)
+        if (sceneDef && sceneDef.imageUrl) {
+           refImage = sceneDef.imageUrl;
+        }
       }
 
       const finalStyle = customStyle || state.imageStyle;
-      const b64 = await generateSceneImage(prompt, finalStyle, state.aspectRatio, refImage);
+      const b64 = await generateSceneImage(fullPrompt, finalStyle, state.aspectRatio, refImage);
       
       handleUpdateItem(id, { imageUrl: b64, isGeneratingVisual: false });
     } catch (e: any) {
@@ -374,10 +412,11 @@ export default function App() {
      }));
 
      const projectData = {
-        version: 1,
+        version: 1.1,
         date: new Date().toISOString(),
         storyText: state.storyText,
         cast: state.cast,
+        scenes: state.scenes || [],
         items: itemsToSave,
         config: {
            enableSfx: state.enableSfx,
@@ -425,6 +464,7 @@ export default function App() {
              ...prev,
              storyText: json.storyText || '',
              cast: json.cast || [],
+             scenes: json.scenes || [],
              items: restoredItems,
              enableSfx: json.config?.enableSfx ?? false,
              includeNarrator: json.config?.includeNarrator ?? true,
@@ -655,99 +695,142 @@ export default function App() {
       {state.cast.length > 0 && (
         <main className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
           
-          {/* Left Column: Cast */}
-          <section className="lg:col-span-1 space-y-4">
-             <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Users size={18} className="text-indigo-400" /> Cast
-                </h2>
-                {state.enableImages && (
-                  <button 
-                    onClick={handleGenerateAllCastImages}
-                    disabled={isGeneratingImages}
-                    className="flex items-center gap-2 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-medium transition-colors"
-                  >
-                    {isGeneratingImages ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
-                    Generate All Portraits
-                  </button>
-                )}
-             </div>
+          {/* Left Column: Cast & Scenes */}
+          <section className="lg:col-span-1 space-y-8">
              
+             {/* Scenes List */}
              <div className="space-y-4">
-                {state.cast.map((member, idx) => {
-                  const isNarratorMember = isNarrator(member.name);
-                  return (
-                    <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col gap-3">
-                       <div className="flex items-start gap-3">
-                          {/* Cast Portrait - Show Mic icon if Narrator */}
-                          <div className="w-24 h-24 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700 relative group flex items-center justify-center text-zinc-600">
-                            {member.imageUrl ? (
-                               <img src={`data:image/png;base64,${member.imageUrl}`} className="w-full h-full object-cover" alt={member.name} />
-                            ) : (
-                               isNarratorMember ? <Mic size={24} className="text-zinc-500" /> : <User size={24} />
-                            )}
-                            
-                            {/* Hover Overlay - Hide for Narrator unless manually enabled? Let's hide to follow instruction */}
-                             {!isNarratorMember && (
-                               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                 <button 
-                                    onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
-                                    disabled={member.isGeneratingVisual}
-                                    className="text-white hover:text-indigo-400"
-                                 >
-                                    {member.isGeneratingVisual ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
-                                 </button>
-                               </div>
-                             )}
-                          </div>
-
-                          <div className="flex-1 min-w-0 space-y-2">
-                             <div>
-                                <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
-                                <p className="text-xs text-zinc-500 truncate">{member.description}</p>
+                <div className="flex items-center justify-between">
+                   <h2 className="text-lg font-semibold flex items-center gap-2">
+                     <MapPin size={18} className="text-indigo-400" /> Scenes
+                   </h2>
+                </div>
+                {state.scenes.length === 0 && (
+                   <div className="text-xs text-zinc-500 italic p-2 border border-zinc-800 rounded">No specific scenes identified. Script will use general visuals.</div>
+                )}
+                <div className="space-y-3">
+                   {state.scenes.map((scene, idx) => (
+                      <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col gap-3">
+                          <div className="flex items-start gap-3">
+                             <div className="w-20 h-16 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700 relative group flex items-center justify-center text-zinc-600">
+                                {scene.imageUrl ? (
+                                   <img src={`data:image/png;base64,${scene.imageUrl}`} className="w-full h-full object-cover" alt={scene.name} />
+                                ) : (
+                                   <ImageIcon size={20} />
+                                )}
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                  <button 
+                                     onClick={() => handleGenerateMasterSceneImage(scene.name, scene.visualDescription)}
+                                     disabled={scene.isGeneratingVisual}
+                                     className="text-white hover:text-indigo-400"
+                                  >
+                                     {scene.isGeneratingVisual ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                  </button>
+                                </div>
                              </div>
-                             
-                             <div className="flex items-center gap-2">
-                               <div className="flex-1">
-                                 <select 
-                                   value={member.voice} 
-                                   onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
-                                   className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-[10px] focus:outline-none"
-                                 >
-                                   {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                                 </select>
-                               </div>
+                             <div className="flex-1 min-w-0">
+                                <h4 className="font-bold text-sm text-white truncate">{scene.name}</h4>
+                                <p className="text-[10px] text-zinc-500 line-clamp-3">{scene.visualDescription}</p>
                              </div>
                           </div>
-                       </div>
+                      </div>
+                   ))}
+                </div>
+             </div>
 
-                       {/* Visual Description Edit - Hide for Narrator */}
-                       {!isNarratorMember && (
-                         <div className="bg-zinc-950/50 rounded p-2 border border-zinc-800/50 space-y-2">
-                            <div className="flex items-center justify-between">
-                               <span className="text-[10px] text-zinc-500 font-semibold uppercase flex items-center gap-1">
-                                  <ImageIcon size={10} /> Visual Prompt
-                               </span>
-                               <button 
-                                  onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
-                                  disabled={member.isGeneratingVisual || !member.visualDescription}
-                                  className="text-[10px] bg-zinc-800 hover:bg-indigo-600 text-zinc-300 hover:text-white px-2 py-0.5 rounded transition-colors flex items-center gap-1"
-                               >
-                                  {member.isGeneratingVisual ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
-                                  Generate
-                               </button>
+             {/* Cast List */}
+             <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                   <h2 className="text-lg font-semibold flex items-center gap-2">
+                     <Users size={18} className="text-indigo-400" /> Cast
+                   </h2>
+                   {state.enableImages && (
+                     <button 
+                       onClick={handleGenerateAllCastImages}
+                       disabled={isGeneratingImages}
+                       className="flex items-center gap-2 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-medium transition-colors"
+                     >
+                       {isGeneratingImages ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
+                       Generate All Portraits
+                     </button>
+                   )}
+                </div>
+                
+                <div className="space-y-4">
+                   {state.cast.map((member, idx) => {
+                     const isNarratorMember = isNarrator(member.name);
+                     return (
+                       <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col gap-3">
+                          <div className="flex items-start gap-3">
+                             {/* Cast Portrait */}
+                             <div className="w-24 h-24 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700 relative group flex items-center justify-center text-zinc-600">
+                               {member.imageUrl ? (
+                                  <img src={`data:image/png;base64,${member.imageUrl}`} className="w-full h-full object-cover" alt={member.name} />
+                               ) : (
+                                  isNarratorMember ? <Mic size={24} className="text-zinc-500" /> : <User size={24} />
+                               )}
+                               
+                                {!isNarratorMember && (
+                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                    <button 
+                                       onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
+                                       disabled={member.isGeneratingVisual}
+                                       className="text-white hover:text-indigo-400"
+                                    >
+                                       {member.isGeneratingVisual ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
+                                    </button>
+                                  </div>
+                                )}
+                             </div>
+   
+                             <div className="flex-1 min-w-0 space-y-2">
+                                <div>
+                                   <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
+                                   <p className="text-xs text-zinc-500 truncate">{member.description}</p>
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1">
+                                    <select 
+                                      value={member.voice} 
+                                      onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                                      className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-[10px] focus:outline-none"
+                                    >
+                                      {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                                    </select>
+                                  </div>
+                                </div>
+                             </div>
+                          </div>
+   
+                          {/* Visual Description Edit */}
+                          {!isNarratorMember && (
+                            <div className="bg-zinc-950/50 rounded p-2 border border-zinc-800/50 space-y-2">
+                               <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-zinc-500 font-semibold uppercase flex items-center gap-1">
+                                     <ImageIcon size={10} /> Visual Prompt
+                                  </span>
+                                  <button 
+                                     onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
+                                     disabled={member.isGeneratingVisual || !member.visualDescription}
+                                     className="text-[10px] bg-zinc-800 hover:bg-indigo-600 text-zinc-300 hover:text-white px-2 py-0.5 rounded transition-colors flex items-center gap-1"
+                                  >
+                                     {member.isGeneratingVisual ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                                     Generate
+                                  </button>
+                               </div>
+                               <textarea 
+                                  value={member.visualDescription || ''}
+                                  onChange={(e) => handleUpdateCast(member.name, { visualDescription: e.target.value })}
+                                  className="w-full bg-transparent text-[11px] text-zinc-400 focus:text-zinc-200 focus:outline-none resize-none leading-tight h-12"
+                                  placeholder="Describe character appearance..."
+                               />
                             </div>
-                            <textarea 
-                               value={member.visualDescription || ''}
-                               onChange={(e) => handleUpdateCast(member.name, { visualDescription: e.target.value })}
-                               className="w-full bg-transparent text-[11px] text-zinc-400 focus:text-zinc-200 focus:outline-none resize-none leading-tight h-12"
-                               placeholder="Describe character appearance..."
-                            />
-                         </div>
-                       )}
-                    </div>
-                  );
-                })}
+                          )}
+                       </div>
+                     );
+                   })}
+                </div>
              </div>
           </section>
 

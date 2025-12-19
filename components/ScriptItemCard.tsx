@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { ItemType, ScriptItem, AspectRatio } from '../types';
-import { Play, Square, Mic, Music, Trash2, ArrowUp, ArrowDown, Search, Loader2, Link as LinkIcon, Volume2, MessageSquare, RotateCw, Wand2, AlertCircle, ImageIcon } from 'lucide-react';
+import { Play, Square, Mic, Music, Trash2, ArrowUp, ArrowDown, Search, Loader2, Link as LinkIcon, Volume2, MessageSquare, RotateCw, Wand2, AlertCircle, ImageIcon, MapPin } from 'lucide-react';
 
 interface ScriptItemCardProps {
   item: ScriptItem;
@@ -96,6 +96,12 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
           <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
             {item.type === ItemType.SPEECH ? 'Dialogue' : 'Sound Effect'}
           </span>
+          {item.location && (
+            <div className="flex items-center gap-1 bg-zinc-950 px-2 py-0.5 rounded text-[10px] text-zinc-400 border border-zinc-800">
+              <MapPin size={10} />
+              <span>{item.location}</span>
+            </div>
+          )}
           {item.type === ItemType.SPEECH && (
              <div className="flex items-center gap-2 ml-2 bg-zinc-800 px-2 py-0.5 rounded border border-zinc-700">
                 <span className="text-sm font-bold text-zinc-200">

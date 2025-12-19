@@ -7,10 +7,12 @@ interface ScriptItemCardProps {
   item: ScriptItem;
   index: number;
   totalItems: number;
-  assignedVoice?: string; 
+  assignedVoice?: string;
+  characterImageUrl?: string; 
+  allCastReady: boolean; // New Prop for global readiness
   elevenLabsApiKey?: string;
   enableImages: boolean;
-  aspectRatio: AspectRatio; // New prop
+  aspectRatio: AspectRatio;
   onUpdate: (id: string, updates: Partial<ScriptItem>) => void;
   onRemove: (id: string) => void;
   onMove: (index: number, direction: 'up' | 'down') => void;
@@ -33,6 +35,8 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
   index,
   totalItems,
   assignedVoice,
+  characterImageUrl,
+  allCastReady,
   elevenLabsApiKey,
   enableImages,
   aspectRatio,
@@ -63,12 +67,18 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
   };
 
   // Determine container class based on aspect ratio
-  // For mobile (9:16), we want a taller container, but not too huge in the list view.
-  // We'll use a fixed width and let height adapt, or specific aspect classes.
   const aspectClass = aspectRatio === '16:9' ? 'aspect-video' : 'aspect-[9/16]';
 
   // Check if narrator
   const isNarratorCharacter = isNarrator(item.character);
+  
+  // Logic: 
+  // 1. If global cast is not ready, disable ALL scene generation (including SFX).
+  // 2. If global cast is ready, verify specific character image exists for Dialogue items (redundant if global is true, but safe).
+  // 3. Narrator Dialogue items can generate if global is ready (they don't need their own image, but obey strict workflow).
+  
+  const isDisabled = !allCastReady;
+  const disabledMessage = "Generate all cast portraits first";
 
   return (
     <div className={`relative flex flex-col gap-3 p-4 rounded-xl border transition-all duration-300 ${
@@ -232,9 +242,9 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
                 {item.imageUrl ? (
                   <img src={`data:image/png;base64,${item.imageUrl}`} className="w-full h-full object-cover" alt="Scene" />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-700 gap-1">
+                  <div className={`w-full h-full flex flex-col items-center justify-center gap-1 ${isDisabled ? 'text-zinc-700' : 'text-zinc-600'}`}>
                      <ImageIcon size={24} />
-                     <span className="text-[10px]">No Image</span>
+                     <span className="text-[10px]">{isDisabled ? 'Waiting...' : 'No Image'}</span>
                   </div>
                 )}
                 
@@ -247,16 +257,26 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
                           ? `${item.expression || 'dramatic'} mood, ${item.character} speaking` 
                           : `${item.sfxDescription}`
                       )}
-                      disabled={item.isGeneratingVisual}
-                      className="bg-zinc-100 text-black px-3 py-1.5 rounded-md text-xs font-bold hover:scale-105 transition-transform flex items-center gap-1"
+                      disabled={item.isGeneratingVisual || isDisabled}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+                        isDisabled 
+                          ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-80' 
+                          : 'bg-zinc-100 text-black hover:scale-105'
+                      }`}
                     >
                       {item.isGeneratingVisual ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-                      {item.imageUrl ? 'Regen' : 'Gen'}
+                      {isDisabled ? 'Wait for Cast' : (item.imageUrl ? 'Regen' : 'Gen')}
                     </button>
                 </div>
              </div>
              
-             {item.character && item.type === ItemType.SPEECH && !isNarratorCharacter && (
+             {isDisabled && (
+               <p className="text-[10px] text-amber-500/80 text-center font-medium">
+                 {disabledMessage}
+               </p>
+             )}
+
+             {item.character && item.type === ItemType.SPEECH && !isNarratorCharacter && !isDisabled && (
                 <p className="text-[10px] text-zinc-500 text-center">
                   Uses {item.character}'s portrait as reference
                 </p>

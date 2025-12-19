@@ -7,7 +7,7 @@ import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, buff
 import { generateVideoFromScript } from './utils/videoUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload, ImageIcon, Video, RefreshCw, Pencil, Palette, Smartphone, Monitor, ImagePlus, Mic } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload, ImageIcon, Video, RefreshCw, Pencil, Palette, Smartphone, Monitor, ImagePlus, Mic, Mic2 } from 'lucide-react';
 
 const VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir", 
@@ -41,6 +41,7 @@ export default function App() {
     isPlaying: false,
     currentPlayingId: null,
     enableSfx: false,
+    includeNarrator: true, // Default to having a narrator
     enableImages: true,
     imageStyle: "Cinematic Realistic",
     aspectRatio: "16:9",
@@ -61,6 +62,11 @@ export default function App() {
   // Ref for file input
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Computed state: Check if all non-narrator cast members have images
+  const allCastReady = state.cast
+    .filter(c => !isNarrator(c.name))
+    .every(c => !!c.imageUrl);
+
   const handleGenerateScript = async () => {
     if (!state.storyText.trim()) return;
     
@@ -68,8 +74,8 @@ export default function App() {
     setState(prev => ({ ...prev, isGeneratingScript: true }));
     
     try {
-      // 1. Generate Script text
-      const { cast, items } = await generateScriptFromStory(state.storyText, state.enableSfx);
+      // 1. Generate Script text with Narrator flag
+      const { cast, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator);
       
       // Update state immediately with text
       setState(prev => ({ ...prev, cast, items, isGeneratingScript: false }));
@@ -107,14 +113,20 @@ export default function App() {
 
   const handleGenerateAllSceneImages = async () => {
     if (state.items.length === 0) return;
+    
+    // Strictly enforce cast readiness
+    if (!allCastReady) {
+       alert("Please generate all character portraits before generating scene images.");
+       return;
+    }
+
     setIsGeneratingImages(true);
 
-    const itemsToProcess = state.items.filter(item => 
-      !item.imageUrl && (
-        (item.type === ItemType.SPEECH && item.character) || 
-        (item.type === ItemType.SFX && item.sfxDescription)
-      )
-    );
+    const itemsToProcess = state.items.filter(item => {
+      // Skip if already has image
+      if (item.imageUrl) return false;
+      return true; // Process all items that don't have images (Speech AND SFX)
+    });
 
     for (const item of itemsToProcess) {
        let prompt = "";
@@ -370,6 +382,7 @@ export default function App() {
         config: {
            enableSfx: state.enableSfx,
            enableImages: state.enableImages,
+           includeNarrator: state.includeNarrator,
            imageStyle: state.imageStyle,
            aspectRatio: state.aspectRatio,
            useElevenLabsForSpeech: state.useElevenLabsForSpeech
@@ -414,6 +427,7 @@ export default function App() {
              cast: json.cast || [],
              items: restoredItems,
              enableSfx: json.config?.enableSfx ?? false,
+             includeNarrator: json.config?.includeNarrator ?? true,
              enableImages: json.config?.enableImages ?? true,
              imageStyle: json.config?.imageStyle || "Cinematic Realistic",
              aspectRatio: json.config?.aspectRatio || "16:9",
@@ -576,6 +590,22 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* Narrator Toggle */}
+                  <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                     <div className="flex items-center gap-3">
+                        <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
+                           <Mic2 size={18} />
+                        </div>
+                        <div>
+                           <p className="text-sm font-medium">Include Narrator</p>
+                           <p className="text-xs text-zinc-500">Enable narrator role</p>
+                        </div>
+                     </div>
+                     <button onClick={() => setState(prev => ({...prev, includeNarrator: !prev.includeNarrator}))}>
+                        {state.includeNarrator ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                     </button>
+                  </div>
+
                   {/* SFX Toggle */}
                   <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
                      <div className="flex items-center gap-3">
@@ -731,8 +761,13 @@ export default function App() {
                    {state.enableImages && (
                       <button 
                         onClick={handleGenerateAllSceneImages}
-                        disabled={isGeneratingImages}
-                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+                        disabled={isGeneratingImages || !allCastReady}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-2 ${
+                           allCastReady 
+                           ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200' 
+                           : 'bg-zinc-900 text-zinc-600 cursor-not-allowed border border-zinc-800'
+                        }`}
+                        title={!allCastReady ? "Generate all character portraits first" : ""}
                       >
                         {isGeneratingImages ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
                         Generate All Scenes
@@ -750,32 +785,37 @@ export default function App() {
              </div>
 
              <div className="space-y-4">
-                {state.items.map((item, index) => (
-                  <ScriptItemCard 
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    totalItems={state.items.length}
-                    assignedVoice={state.cast.find(c => c.name === item.character)?.voice}
-                    elevenLabsApiKey={state.elevenLabsApiKey}
-                    enableImages={state.enableImages}
-                    aspectRatio={state.aspectRatio}
-                    onUpdate={handleUpdateItem}
-                    onRemove={handleRemoveItem}
-                    onMove={handleMoveItem}
-                    onGenerateAudio={handleGenerateAudio}
-                    onGenerateSfx={handleGenerateSfx}
-                    onGenerateImage={handleGenerateItemImage}
-                    onPreviewAudio={(buffer) => {
-                      const ctx = getAudioContext();
-                      const source = ctx.createBufferSource();
-                      source.buffer = buffer;
-                      source.connect(ctx.destination);
-                      source.start();
-                    }}
-                    isPlaying={state.currentPlayingId === item.id}
-                  />
-                ))}
+                {state.items.map((item, index) => {
+                  const castMember = state.cast.find(c => c.name === item.character);
+                  return (
+                    <ScriptItemCard 
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      totalItems={state.items.length}
+                      assignedVoice={castMember?.voice}
+                      characterImageUrl={castMember?.imageUrl}
+                      allCastReady={allCastReady} // Pass global readiness
+                      elevenLabsApiKey={state.elevenLabsApiKey}
+                      enableImages={state.enableImages}
+                      aspectRatio={state.aspectRatio}
+                      onUpdate={handleUpdateItem}
+                      onRemove={handleRemoveItem}
+                      onMove={handleMoveItem}
+                      onGenerateAudio={handleGenerateAudio}
+                      onGenerateSfx={handleGenerateSfx}
+                      onGenerateImage={handleGenerateItemImage}
+                      onPreviewAudio={(buffer) => {
+                        const ctx = getAudioContext();
+                        const source = ctx.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(ctx.destination);
+                        source.start();
+                      }}
+                      isPlaying={state.currentPlayingId === item.id}
+                    />
+                  );
+                })}
              </div>
           </section>
 

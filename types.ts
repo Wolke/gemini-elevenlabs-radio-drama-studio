@@ -54,6 +54,7 @@ export interface DramaState {
   
   // Configuration
   enableSfx: boolean;
+  includeNarrator: boolean; // New config to toggle Narrator presence
   enableImages: boolean; // New config
   imageStyle: string; // e.g. "Watercolor", "Cyberpunk"
   aspectRatio: AspectRatio; 

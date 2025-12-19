@@ -20,7 +20,11 @@ const ALL_VOICES = [
   "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
 ];
 
-export const generateScriptFromStory = async (story: string, includeSfx: boolean = true): Promise<{ cast: CastMember[], items: ScriptItem[] }> => {
+export const generateScriptFromStory = async (
+  story: string, 
+  includeSfx: boolean = true,
+  includeNarrator: boolean = true
+): Promise<{ cast: CastMember[], items: ScriptItem[] }> => {
   if (!story.trim()) return { cast: [], items: [] };
 
   let sfxInstructions = "";
@@ -36,6 +40,21 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
     `;
   }
 
+  let narratorInstructions = "";
+  if (includeNarrator) {
+    narratorInstructions = `
+       - **Narrator**: You MUST include a character named 'Narrator' (or '旁白' if the story is in Chinese) in the cast and script. 
+         - Use the Narrator to describe the setting, actions, transitions, and atmosphere that cannot be conveyed by dialogue alone.
+         - Ensure the Narrator appears frequently to guide the listener.
+    `;
+  } else {
+    narratorInstructions = `
+       - **Narrator**: DO NOT include a Narrator or System character. 
+         - The story must be conveyed ENTIRELY through character dialogue${includeSfx ? ' and sound effects' : ''}.
+         - Adapt the dialogue so characters describe actions if necessary.
+    `;
+  }
+
   const prompt = `
     You are an expert radio drama scriptwriter and director. 
     Convert the following story into a detailed radio drama script with a cast list and a sequence of cues.
@@ -45,9 +64,11 @@ export const generateScriptFromStory = async (story: string, includeSfx: boolean
     - The 'expression' field MUST ALWAYS be in ENGLISH.
     - The 'visualDescription' for characters MUST be in ENGLISH (detailed physical appearance for image generation).
 
+    **INSTRUCTIONS**:
     1. **Cast**: Identify all characters. 
        - Assign a voice.
        - Provide a 'visualDescription': A concise but evocative physical description (e.g., "A grizzled cyber-noir detective with a neon-lit trench coat").
+       ${narratorInstructions}
        
     2. **Script**: A list of cues.
        - For 'speech':

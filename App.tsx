@@ -60,8 +60,10 @@ export default function App() {
   const [customStyle, setCustomStyle] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Ref for file input
+  // Ref for file inputs
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageUploadRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<{ type: 'cast' | 'scene', name: string } | null>(null);
 
   // Computed state: Check if all non-narrator cast members have images
   const allCastReady = state.cast
@@ -184,6 +186,51 @@ export default function App() {
       }));
     }
   };
+
+  // --- Image Upload Logic ---
+  const triggerImageUpload = (type: 'cast' | 'scene', name: string) => {
+    uploadTargetRef.current = { type, name };
+    imageUploadRef.current?.click();
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadTargetRef.current) return;
+
+    const target = uploadTargetRef.current;
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      // Extract base64 data (remove "data:image/xxx;base64," prefix for consistency with generated images)
+      // Gemini API returns raw base64, but for display we usually add prefix.
+      // However, App state `imageUrl` is expected to be raw base64 in some helper functions (like videoUtils logic checking for 'data:').
+      // Let's store raw base64 to match `geminiService` output.
+      let base64Data = result;
+      if (result.includes(',')) {
+        base64Data = result.split(',')[1];
+      }
+
+      if (target.type === 'cast') {
+        setState(prev => ({
+          ...prev,
+          cast: prev.cast.map(c => c.name === target.name ? { ...c, imageUrl: base64Data } : c)
+        }));
+      } else if (target.type === 'scene') {
+        setState(prev => ({
+          ...prev,
+          scenes: prev.scenes.map(s => s.name === target.name ? { ...s, imageUrl: base64Data } : s)
+        }));
+      }
+
+      // Reset
+      if (imageUploadRef.current) imageUploadRef.current.value = '';
+      uploadTargetRef.current = null;
+    };
+
+    reader.readAsDataURL(file);
+  };
+  // --------------------------
 
   const handleUpdateItem = (id: string, updates: Partial<ScriptItem>) => {
     setState(prev => ({
@@ -494,8 +541,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 p-4 md:p-8 max-w-5xl mx-auto">
       
-      {/* Hidden File Input */}
+      {/* Hidden File Inputs */}
       <input type="file" ref={fileInputRef} onChange={handleLoadProject} accept=".json" className="hidden" />
+      <input type="file" ref={imageUploadRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
 
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -718,13 +766,21 @@ export default function App() {
                                 ) : (
                                    <ImageIcon size={20} />
                                 )}
-                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity">
                                   <button 
                                      onClick={() => handleGenerateMasterSceneImage(scene.name, scene.visualDescription)}
                                      disabled={scene.isGeneratingVisual}
                                      className="text-white hover:text-indigo-400"
+                                     title="Generate"
                                   >
                                      {scene.isGeneratingVisual ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                  </button>
+                                  <button 
+                                     onClick={() => triggerImageUpload('scene', scene.name)}
+                                     className="text-white hover:text-indigo-400"
+                                     title="Upload"
+                                  >
+                                     <Upload size={16} />
                                   </button>
                                 </div>
                              </div>
@@ -770,17 +826,25 @@ export default function App() {
                                   isNarratorMember ? <Mic size={24} className="text-zinc-500" /> : <User size={24} />
                                )}
                                
-                                {!isNarratorMember && (
-                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                    <button 
-                                       onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
-                                       disabled={member.isGeneratingVisual}
-                                       className="text-white hover:text-indigo-400"
-                                    >
-                                       {member.isGeneratingVisual ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
-                                    </button>
-                                  </div>
-                                )}
+                               {!isNarratorMember && (
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity">
+                                  <button 
+                                     onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
+                                     disabled={member.isGeneratingVisual}
+                                     className="text-white hover:text-indigo-400"
+                                     title="Generate"
+                                  >
+                                     {member.isGeneratingVisual ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
+                                  </button>
+                                  <button 
+                                     onClick={() => triggerImageUpload('cast', member.name)}
+                                     className="text-white hover:text-indigo-400"
+                                     title="Upload"
+                                  >
+                                     <Upload size={20} />
+                                  </button>
+                                </div>
+                               )}
                              </div>
    
                              <div className="flex-1 min-w-0 space-y-2">
@@ -818,7 +882,7 @@ export default function App() {
                                      {member.isGeneratingVisual ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
                                      Generate
                                   </button>
-                               </div>
+                                </div>
                                <textarea 
                                   value={member.visualDescription || ''}
                                   onChange={(e) => handleUpdateCast(member.name, { visualDescription: e.target.value })}

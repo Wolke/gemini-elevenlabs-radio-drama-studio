@@ -242,17 +242,17 @@ const generateRawImage = async (
   try {
     const parts: any[] = [];
 
-    // Add all reference images with their labels
+    // Add all reference images with concise labels
     if (referenceImages && referenceImages.length > 0) {
       for (const refImg of referenceImages) {
+        // Add brief label BEFORE the image
+        parts.push({ text: `[${refImg.label}]:` });
         parts.push({
           inlineData: {
             mimeType: 'image/png',
             data: refImg.base64
           }
         });
-        // Add a text label right after each image to help the model identify it
-        parts.push({ text: `[Above image is: ${refImg.label}]` });
       }
     }
 
@@ -314,8 +314,12 @@ export interface CharacterReference {
 
 /**
  * Generates a Scene/Dialogue Image with support for multiple character references and scene reference
- * @param characterRefs - Array of character reference images (to maintain character appearances)
- * @param sceneRefBase64 - Scene/background reference image (to maintain environment consistency)
+ * 
+ * STRATEGY:
+ * 1. Scene background reference goes FIRST (less important, further from main prompt)
+ * 2. Character references go AFTER scene (more important, closer to main prompt)
+ * 3. Main prompt comes LAST (most important)
+ * 4. Shorter, more direct instructions
  */
 export const generateSceneImage = async (
   description: string,
@@ -326,62 +330,59 @@ export const generateSceneImage = async (
   apiKey?: string
 ): Promise<string> => {
 
-  // Build reference images array
+  // Build reference images array - ORDER MATTERS!
+  // Scene first (background), then characters (important, close to prompt)
   const refImages: ReferenceImage[] = [];
 
-  // Add all character references
+  // 1. Scene background FIRST (less priority)
+  if (sceneRefBase64) {
+    refImages.push({
+      base64: sceneRefBase64,
+      label: "BACKGROUND"
+    });
+  }
+
+  // 2. Character references AFTER scene (higher priority, closer to prompt)
   if (characterRefs && characterRefs.length > 0) {
     for (const charRef of characterRefs) {
       refImages.push({
         base64: charRef.base64,
-        label: `CHARACTER_REFERENCE: ${charRef.name}`
+        label: charRef.name  // Just the name, cleaner
       });
     }
   }
 
-  // Add scene reference
-  if (sceneRefBase64) {
-    refImages.push({
-      base64: sceneRefBase64,
-      label: "SCENE_BACKGROUND_REFERENCE"
-    });
-  }
+  // Build a CONCISE and DIRECT prompt
+  const charNames = characterRefs?.map(c => c.name).join('、') || '';
 
-  // Build prompt with appropriate instructions
-  let prompt = `
-    ${style} style.
-    Cinematic scene: ${description}.
-    
-    REQUIREMENTS:
-    - No text, no speech bubbles, no captions.
-    - Strong atmosphere and lighting.
-    - Focus on the scene composition.
-  `;
+  let prompt = `Generate a ${style} illustration.
 
-  // Add character consistency instructions if we have character references
+SCENE: ${description}
+
+OUTPUT REQUIREMENTS:
+- No text, speech bubbles, or watermarks
+- Cinematic composition with strong lighting
+`;
+
+  // Character instructions - VERY direct
   if (characterRefs && characterRefs.length > 0) {
-    const charNames = characterRefs.map(c => c.name).join(', ');
     prompt += `
-    CRITICAL CHARACTER CONSISTENCY INSTRUCTIONS:
-    - You are provided with ${characterRefs.length} character reference image(s) for: ${charNames}.
-    - Each character reference is labeled with "CHARACTER_REFERENCE: [Name]".
-    - You MUST maintain the EXACT same appearance for each character: face shape, eye color, hair style, hair color, skin tone, clothing, and all distinguishing features.
-    - Each character in the generated scene MUST look like the EXACT SAME PERSON as shown in their respective reference image.
-    - Draw these specific characters performing the actions described in the scene.
-    - Do NOT change any character's appearance or design in any way.
-    - DO NOT combine or merge character features.
-    `;
+CHARACTER INSTRUCTIONS (CRITICAL):
+The attached images show the character design for: ${charNames}.
+You MUST copy the EXACT appearance from these reference images:
+- SAME face structure and facial features
+- SAME hairstyle and hair color
+- SAME clothing and accessories
+- SAME body proportions
+The characters in your output MUST be visually identical to the reference images.
+`;
   }
 
-  // Add scene consistency instructions if we have a scene reference
+  // Scene instructions
   if (sceneRefBase64) {
     prompt += `
-    SCENE ENVIRONMENT INSTRUCTIONS:
-    - The image labeled "SCENE_BACKGROUND_REFERENCE" shows the environment/location.
-    - Use this as the visual reference for the BACKGROUND and ENVIRONMENT.
-    - Maintain consistency with the scene's atmosphere, lighting, colors, and architectural elements.
-    - The background should match or closely resemble the reference scene.
-    `;
+BACKGROUND: Use the attached background image as reference for the environment.
+`;
   }
 
   return generateRawImage(prompt, aspectRatio, refImages.length > 0 ? refImages : undefined, apiKey);

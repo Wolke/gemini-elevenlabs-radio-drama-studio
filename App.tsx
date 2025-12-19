@@ -384,9 +384,17 @@ export default function App() {
         console.log(`[Image Gen] Using scene reference for location: ${sceneDef.name}`);
       }
 
-      // Always include scene description in prompt for context
+      // Include scene info in prompt:
+      // - If we have a background image, just mention the location name (let image do the work)
+      // - If NO background image, include full text description as fallback
       if (sceneDef) {
-        finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
+        if (sceneRef) {
+          // Has background image - minimal text, rely on image reference
+          finalPrompt += `. Location: ${sceneDef.name}`;
+        } else {
+          // No background image - need full text description
+          finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
+        }
       }
 
       const finalStyle = customStyle || state.imageStyle;

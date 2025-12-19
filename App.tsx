@@ -333,63 +333,50 @@ export default function App() {
       const item = state.items.find(i => i.id === id);
       if (!item) return;
 
-      let refImage = undefined;
-      let refType: 'character' | 'scene' | undefined = undefined;
+      let characterRef: string | undefined = undefined;
+      let sceneRef: string | undefined = undefined;
       let finalPrompt = basePrompt;
 
       // 1. Find the Location (Scene) definition
       const sceneDef = state.scenes.find(s => s.name === item.location);
 
-      // 2. Determine Reference Image & Context Strategy
-
+      // 2. Determine Reference Images
       const isSpeech = item.type === ItemType.SPEECH;
       const isNarratorLine = item.character && isNarrator(item.character);
 
+      // Get character reference for non-narrator speech
       if (isSpeech && !isNarratorLine) {
-        // --- CASE 1: Character Dialogue ---
-        // Reference: Character Portrait (to keep character consistent)
         const member = state.cast.find(c => c.name === item.character);
         if (member && member.imageUrl) {
-          refImage = member.imageUrl;
-          refType = 'character';
+          characterRef = member.imageUrl;
           console.log(`[Image Gen] Using character reference for: ${item.character}`);
         } else {
           console.log(`[Image Gen] No character image found for: ${item.character}`);
         }
+      }
 
-        // Prompt: We MUST include scene details here because the Reference Image (Portrait) 
-        // usually has a neutral background. We need to tell the model to put this character 
-        // into the specific scene environment.
-        if (sceneDef) {
-          finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
-        }
+      // Get scene reference for all items (if available)
+      if (sceneDef && sceneDef.imageUrl) {
+        sceneRef = sceneDef.imageUrl;
+        console.log(`[Image Gen] Using scene reference for location: ${sceneDef.name}`);
+      }
 
-      } else {
-        // --- CASE 2: Narrator or SFX ---
-        // Reference: Master Scene Image (to keep environment consistent)
-        if (sceneDef && sceneDef.imageUrl) {
-          refImage = sceneDef.imageUrl;
-          refType = 'scene';
-          console.log(`[Image Gen] Using scene reference for location: ${sceneDef.name}`);
-        }
-
-        // Prompt Logic:
-        // If we represent the scene using the reference image, we suppress the textual environment description
-        // to prioritize the "Action/Event" description in basePrompt.
-        if (refImage) {
-          // We have the visual reference for the environment, so we don't textually describe it again.
-          // finalPrompt only contains the Action/Event from basePrompt.
-        } else {
-          // No reference image (first generation or missing). 
-          // We need textual description to generate the background.
-          if (sceneDef) {
-            finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
-          }
-        }
+      // Always include scene description in prompt for context
+      if (sceneDef) {
+        finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
       }
 
       const finalStyle = customStyle || state.imageStyle;
-      const b64 = await generateSceneImage(finalPrompt, finalStyle, state.aspectRatio, refImage, refType, state.geminiApiKey);
+
+      // Pass both character and scene references
+      const b64 = await generateSceneImage(
+        finalPrompt,
+        finalStyle,
+        state.aspectRatio,
+        characterRef,    // Character reference (optional)
+        sceneRef,        // Scene reference (optional)
+        state.geminiApiKey
+      );
 
       handleUpdateItem(id, { imageUrl: b64, isGeneratingVisual: false });
     } catch (e: any) {

@@ -215,26 +215,45 @@ export const generateSpeech = async (text: string, voiceName: string = 'Puck', e
 };
 
 /**
- * Base function for generating images
+ * Reference image with a label for identification in the prompt
  */
-const generateRawImage = async (prompt: string, aspectRatio: AspectRatio, referenceImageBase64?: string, apiKey?: string): Promise<string> => {
+interface ReferenceImage {
+  base64: string;
+  label: string; // e.g., "CHARACTER_REFERENCE", "SCENE_REFERENCE"
+}
+
+/**
+ * Base function for generating images with multiple reference support
+ */
+const generateRawImage = async (
+  prompt: string,
+  aspectRatio: AspectRatio,
+  referenceImages?: ReferenceImage[],
+  apiKey?: string
+): Promise<string> => {
   const ai = getAI(apiKey);
   console.log("--- [Gemini] Generate Image Prompt ---");
   console.log(prompt);
-  if (referenceImageBase64) console.log("[Attached Reference Image Data]");
+  if (referenceImages && referenceImages.length > 0) {
+    console.log(`[Attached ${referenceImages.length} Reference Image(s): ${referenceImages.map(r => r.label).join(', ')}]`);
+  }
   console.log("--------------------------------------");
 
   try {
     const parts: any[] = [];
 
-    // If we have a reference image, add it first
-    if (referenceImageBase64) {
-      parts.push({
-        inlineData: {
-          mimeType: 'image/png',
-          data: referenceImageBase64
-        }
-      });
+    // Add all reference images with their labels
+    if (referenceImages && referenceImages.length > 0) {
+      for (const refImg of referenceImages) {
+        parts.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: refImg.base64
+          }
+        });
+        // Add a text label right after each image to help the model identify it
+        parts.push({ text: `[Above image is: ${refImg.label}]` });
+      }
     }
 
     parts.push({ text: prompt });
@@ -286,18 +305,37 @@ export const generateCharacterSheet = async (description: string, style: string,
 };
 
 /**
- * Generates a Scene/Dialogue Image
- * @param referenceType - 'character' means the reference is a character portrait (maintain character appearance),
- *                        'scene' means the reference is a background/environment (maintain scene style)
+ * Generates a Scene/Dialogue Image with support for both character and scene references
+ * @param characterRefBase64 - Character reference sheet image (to maintain character appearance)
+ * @param sceneRefBase64 - Scene/background reference image (to maintain environment consistency)
  */
 export const generateSceneImage = async (
   description: string,
   style: string,
   aspectRatio: AspectRatio,
-  referenceImageBase64?: string,
-  referenceType?: 'character' | 'scene',
+  characterRefBase64?: string,
+  sceneRefBase64?: string,
   apiKey?: string
 ): Promise<string> => {
+
+  // Build reference images array
+  const refImages: ReferenceImage[] = [];
+
+  if (characterRefBase64) {
+    refImages.push({
+      base64: characterRefBase64,
+      label: "CHARACTER_REFERENCE_SHEET"
+    });
+  }
+
+  if (sceneRefBase64) {
+    refImages.push({
+      base64: sceneRefBase64,
+      label: "SCENE_BACKGROUND_REFERENCE"
+    });
+  }
+
+  // Build prompt with appropriate instructions
   let prompt = `
     ${style} style.
     Cinematic scene: ${description}.
@@ -308,28 +346,28 @@ export const generateSceneImage = async (
     - Focus on the scene composition.
   `;
 
-  if (referenceImageBase64) {
-    if (referenceType === 'character') {
-      prompt += `
+  // Add character consistency instructions if we have a character reference
+  if (characterRefBase64) {
+    prompt += `
     CRITICAL CHARACTER CONSISTENCY INSTRUCTIONS:
-    - The attached image is a CHARACTER REFERENCE SHEET showing the character's appearance.
+    - The image labeled "CHARACTER_REFERENCE_SHEET" shows the character's appearance.
     - You MUST maintain the EXACT same character design: face shape, eye color, hair style, hair color, skin tone, clothing, and all distinguishing features.
-    - The character in the generated scene MUST look like the SAME PERSON as in the reference image.
+    - The character in the generated scene MUST look like the SAME PERSON as in the character reference.
     - Draw this specific character performing the action described in the scene.
     - Do NOT change the character's appearance or design in any way.
     `;
-    } else if (referenceType === 'scene') {
-      prompt += `
-    - IMPORTANT: Use the provided image as the visual reference for the ENVIRONMENT and BACKGROUND STYLE.
-    - Maintain consistency with the scene's atmosphere, lighting, and architectural elements.
-    `;
-    } else {
-      // Fallback for backward compatibility
-      prompt += `
-    - IMPORTANT: Use the provided image as a visual reference.
-    `;
-    }
   }
 
-  return generateRawImage(prompt, aspectRatio, referenceImageBase64, apiKey);
+  // Add scene consistency instructions if we have a scene reference
+  if (sceneRefBase64) {
+    prompt += `
+    SCENE ENVIRONMENT INSTRUCTIONS:
+    - The image labeled "SCENE_BACKGROUND_REFERENCE" shows the environment/location.
+    - Use this as the visual reference for the BACKGROUND and ENVIRONMENT.
+    - Maintain consistency with the scene's atmosphere, lighting, colors, and architectural elements.
+    - The background should match or closely resemble the reference scene.
+    `;
+  }
+
+  return generateRawImage(prompt, aspectRatio, refImages.length > 0 ? refImages : undefined, apiKey);
 };

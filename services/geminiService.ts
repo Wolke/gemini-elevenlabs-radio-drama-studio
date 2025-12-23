@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ItemType, ScriptItem, CastMember, SceneDefinition } from "../types";
+import { ItemType, ScriptItem, CastMember, SceneDefinition, ElevenLabsVoice } from "../types";
 
 // Helper to get or create Gemini client
 // Priority: provided apiKey > environment variable
@@ -31,6 +31,7 @@ export const generateScriptFromStory = async (
   story: string,
   includeSfx: boolean = true,
   includeNarrator: boolean = true,
+  elevenLabsVoices: ElevenLabsVoice[] = [],
   apiKey?: string
 ): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[] }> => {
   if (!story.trim()) return { cast: [], scenes: [], items: [] };
@@ -81,6 +82,11 @@ export const generateScriptFromStory = async (
          - "Native Taiwanese Mandarin speaker, soft and friendly"
          - "Hong Kong Cantonese accent speaking Mandarin, businesslike"
          - "American English speaker, energetic and youthful"
+       ${elevenLabsVoices.length > 0 ? `
+       - **IMPORTANT**: You have access to the following ElevenLabs voices. Pick the most suitable voice for each character based on the voice characteristics:
+${elevenLabsVoices.slice(0, 20).map(v => `         - "${v.name}" (ID: ${v.voice_id})${v.labels ? ` - ${Object.entries(v.labels).map(([k, val]) => `${k}: ${val}`).join(', ')}` : ''}`).join('\n')}
+       - Set 'elevenLabsVoiceId' to the voice ID that best matches the character.
+       ` : ''}
        ${narratorInstructions}
 
     2. **Scenes**: Identify the key locations/environments in the story.
@@ -122,7 +128,8 @@ export const generateScriptFromStory = async (
                   name: { type: Type.STRING },
                   voice: { type: Type.STRING, enum: ALL_VOICES },
                   description: { type: Type.STRING },
-                  voicePrompt: { type: Type.STRING, description: "TTS accent/style prompt in English, e.g. 'Native Taiwanese Mandarin speaker, cheerful'" },
+                  voicePrompt: { type: Type.STRING, description: "TTS accent/style prompt in English" },
+                  elevenLabsVoiceId: { type: Type.STRING, description: "ElevenLabs voice ID if available" },
                 },
                 required: ["name", "voice", "voicePrompt"]
               }

@@ -23,21 +23,33 @@ const isNarrator = (name: string) => {
 };
 
 export default function App() {
-  const [state, setState] = useState<DramaState>({
-    storyText: '',
-    cast: [],
-    scenes: [],
-    items: [],
-    isGeneratingScript: false,
-    isPlaying: false,
-    currentPlayingId: null,
-    enableSfx: true,
-    includeNarrator: true,
-    geminiApiKey: '',
-    elevenLabsApiKey: '',
-    useElevenLabsForSpeech: true,
-    elevenLabsVoices: [],
-    isLoadingVoices: false,
+  const [state, setState] = useState<DramaState>(() => {
+    // Load API keys from localStorage if saved
+    const savedGeminiKey = localStorage.getItem('geminiApiKey') || '';
+    const savedElevenLabsKey = localStorage.getItem('elevenLabsApiKey') || '';
+    return {
+      storyText: '',
+      cast: [],
+      scenes: [],
+      items: [],
+      isGeneratingScript: false,
+      isPlaying: false,
+      currentPlayingId: null,
+      enableSfx: true,
+      includeNarrator: true,
+      geminiApiKey: savedGeminiKey,
+      elevenLabsApiKey: savedElevenLabsKey,
+      useElevenLabsForSpeech: true,
+      elevenLabsVoices: [],
+      isLoadingVoices: false,
+    };
+  });
+
+  const [saveGeminiKey, setSaveGeminiKey] = useState(() => {
+    return localStorage.getItem('saveGeminiKey') === 'true';
+  });
+  const [saveElevenLabsKey, setSaveElevenLabsKey] = useState(() => {
+    return localStorage.getItem('saveElevenLabsKey') === 'true';
   });
 
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
@@ -47,6 +59,27 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Save/clear API keys individually
+  React.useEffect(() => {
+    if (saveGeminiKey && state.geminiApiKey) {
+      localStorage.setItem('saveGeminiKey', 'true');
+      localStorage.setItem('geminiApiKey', state.geminiApiKey);
+    } else {
+      localStorage.removeItem('saveGeminiKey');
+      localStorage.removeItem('geminiApiKey');
+    }
+  }, [saveGeminiKey, state.geminiApiKey]);
+
+  React.useEffect(() => {
+    if (saveElevenLabsKey && state.elevenLabsApiKey) {
+      localStorage.setItem('saveElevenLabsKey', 'true');
+      localStorage.setItem('elevenLabsApiKey', state.elevenLabsApiKey);
+    } else {
+      localStorage.removeItem('saveElevenLabsKey');
+      localStorage.removeItem('elevenLabsApiKey');
+    }
+  }, [saveElevenLabsKey, state.elevenLabsApiKey]);
 
   // Fetch ElevenLabs voices when API key changes
   const handleFetchVoices = async () => {
@@ -69,23 +102,31 @@ export default function App() {
     setState(prev => ({ ...prev, isGeneratingScript: true }));
 
     try {
-      const { cast, scenes, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator, state.geminiApiKey);
+      // Pass ElevenLabs voices to AI so it can pick suitable ones for each character
+      const { cast, scenes, items } = await generateScriptFromStory(
+        state.storyText,
+        state.enableSfx,
+        state.includeNarrator,
+        state.elevenLabsVoices,
+        state.geminiApiKey
+      );
 
-      // If ElevenLabs voices are loaded, prioritize them for cast members
-      let finalCast = cast;
-      if (state.elevenLabsVoices.length > 0) {
-        finalCast = cast.map((member, idx) => {
-          // Pick a voice from the available ElevenLabs voices (round-robin or random)
-          const voiceIdx = idx % state.elevenLabsVoices.length;
-          const elVoice = state.elevenLabsVoices[voiceIdx];
-          return {
-            ...member,
-            voiceType: 'elevenlabs' as const,
-            elevenLabsVoiceId: elVoice.voice_id,
-            voice: elVoice.name, // Display name
-          };
-        });
-      }
+      // Set voiceType based on whether AI assigned an ElevenLabs voice
+      const finalCast = cast.map(member => {
+        if (member.elevenLabsVoiceId && state.elevenLabsVoices.length > 0) {
+          // AI picked a voice - verify it exists and get the name
+          const elVoice = state.elevenLabsVoices.find(v => v.voice_id === member.elevenLabsVoiceId);
+          if (elVoice) {
+            return {
+              ...member,
+              voiceType: 'elevenlabs' as const,
+              voice: elVoice.name,
+            };
+          }
+        }
+        // Default to Gemini voice
+        return { ...member, voiceType: 'gemini' as const };
+      });
 
       setState(prev => ({ ...prev, cast: finalCast, scenes, items, isGeneratingScript: false }));
       setIsConfigExpanded(false);
@@ -377,12 +418,13 @@ export default function App() {
               />
               <button
                 onClick={handleGenerateScript}
-                disabled={state.isGeneratingScript || !state.storyText.trim()}
+                disabled={state.isGeneratingScript || !state.storyText.trim() || !state.geminiApiKey}
                 className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
                 Generate Script & Cast
               </button>
+              {!state.geminiApiKey && <p className="text-amber-400 text-xs text-center">⚠ Enter Gemini API Key first</p>}
               {error && <p className="text-red-400 text-xs text-center">{error}</p>}
             </div>
 
@@ -411,6 +453,15 @@ export default function App() {
                       onChange={(e) => setState(prev => ({ ...prev, elevenLabsApiKey: e.target.value }))}
                       className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-blue-500"
                     />
+                    {state.elevenLabsApiKey && (
+                      <button
+                        onClick={() => setSaveElevenLabsKey(!saveElevenLabsKey)}
+                        className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveElevenLabsKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                        title={saveElevenLabsKey ? 'Saved locally' : 'Click to save locally'}
+                      >
+                        <Save size={12} />
+                      </button>
+                    )}
                     <button
                       onClick={handleFetchVoices}
                       disabled={!state.elevenLabsApiKey || state.isLoadingVoices}
@@ -426,50 +477,50 @@ export default function App() {
                 </div>
 
                 {/* Use ElevenLabs for Speech Toggle */}
-                <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                <div className={`flex items-center justify-between p-3 rounded-lg border ${state.elevenLabsVoices.length > 0 ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
                       <Volume2 size={18} />
                     </div>
                     <div>
                       <p className="text-sm font-medium">Use ElevenLabs for Voices</p>
-                      <p className="text-xs text-zinc-500">High-quality multilingual TTS</p>
+                      <p className="text-xs text-zinc-500">{state.elevenLabsVoices.length > 0 ? 'High-quality multilingual TTS' : 'Fetch voices first'}</p>
                     </div>
                   </div>
-                  <button onClick={() => setState(prev => ({ ...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech }))} disabled={!state.elevenLabsApiKey}>
-                    {state.useElevenLabsForSpeech ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                  <button onClick={() => setState(prev => ({ ...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech }))} disabled={state.elevenLabsVoices.length === 0}>
+                    {state.useElevenLabsForSpeech && state.elevenLabsVoices.length > 0 ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
                   </button>
                 </div>
 
                 {/* Narrator Toggle */}
-                <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                <div className={`flex items-center justify-between p-3 rounded-lg border ${state.geminiApiKey ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
                       <Mic2 size={18} />
                     </div>
                     <div>
                       <p className="text-sm font-medium">Include Narrator</p>
-                      <p className="text-xs text-zinc-500">Enable narrator role</p>
+                      <p className="text-xs text-zinc-500">{state.geminiApiKey ? 'Enable narrator role' : 'Requires Gemini API key'}</p>
                     </div>
                   </div>
-                  <button onClick={() => setState(prev => ({ ...prev, includeNarrator: !prev.includeNarrator }))}>
-                    {state.includeNarrator ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                  <button onClick={() => setState(prev => ({ ...prev, includeNarrator: !prev.includeNarrator }))} disabled={!state.geminiApiKey}>
+                    {state.includeNarrator && state.geminiApiKey ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
                   </button>
                 </div>
 
                 {/* SFX Toggle */}
-                <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                <div className={`flex items-center justify-between p-3 rounded-lg border ${state.elevenLabsApiKey ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
                       <Speaker size={18} />
                     </div>
                     <div>
                       <p className="text-sm font-medium">Sound Effects</p>
-                      <p className="text-xs text-zinc-500">Include SFX cues (ElevenLabs)</p>
+                      <p className="text-xs text-zinc-500">{state.elevenLabsApiKey ? 'Include SFX cues (ElevenLabs)' : 'Requires ElevenLabs API key'}</p>
                     </div>
                   </div>
-                  <button onClick={() => setState(prev => ({ ...prev, enableSfx: !prev.enableSfx }))}>
-                    {state.enableSfx ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                  <button onClick={() => setState(prev => ({ ...prev, enableSfx: !prev.enableSfx }))} disabled={!state.elevenLabsApiKey}>
+                    {state.enableSfx && state.elevenLabsApiKey ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
                   </button>
                 </div>
 
@@ -484,13 +535,24 @@ export default function App() {
                       <p className="text-xs text-zinc-500">For script generation (& fallback TTS)</p>
                     </div>
                   </div>
-                  <input
-                    type="password"
-                    placeholder="Enter your Gemini API Key..."
-                    value={state.geminiApiKey}
-                    onChange={(e) => setState(prev => ({ ...prev, geminiApiKey: e.target.value }))}
-                    className="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="Enter your Gemini API Key..."
+                      value={state.geminiApiKey}
+                      onChange={(e) => setState(prev => ({ ...prev, geminiApiKey: e.target.value }))}
+                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                    {state.geminiApiKey && (
+                      <button
+                        onClick={() => setSaveGeminiKey(!saveGeminiKey)}
+                        className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveGeminiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                        title={saveGeminiKey ? 'Saved locally' : 'Click to save locally'}
+                      >
+                        <Save size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -542,35 +604,76 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* Voice Dropdown */}
-                      {member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
-                        <select
-                          value={member.elevenLabsVoiceId || ''}
-                          onChange={(e) => {
-                            const voice = state.elevenLabsVoices.find(v => v.voice_id === e.target.value);
-                            handleUpdateCast(member.name, {
-                              elevenLabsVoiceId: e.target.value,
-                              voice: voice?.name || member.voice
-                            });
-                          }}
-                          className="w-full bg-zinc-950 border border-blue-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="">Select ElevenLabs Voice...</option>
-                          {state.elevenLabsVoices.map(v => (
-                            <option key={v.voice_id} value={v.voice_id}>
-                              {v.name} {v.category === 'cloned' ? '(Custom)' : ''}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <select
-                          value={member.voice}
-                          onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none"
-                        >
-                          {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      )}
+                      {/* Voice Dropdown with Preview */}
+                      <div className="flex gap-2">
+                        {member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
+                          <>
+                            <select
+                              value={member.elevenLabsVoiceId || ''}
+                              onChange={(e) => {
+                                const voice = state.elevenLabsVoices.find(v => v.voice_id === e.target.value);
+                                handleUpdateCast(member.name, {
+                                  elevenLabsVoiceId: e.target.value,
+                                  voice: voice?.name || member.voice
+                                });
+                              }}
+                              className="flex-1 min-w-0 bg-zinc-950 border border-blue-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 truncate"
+                            >
+                              <option value="">Select Voice...</option>
+                              {state.elevenLabsVoices.map(v => (
+                                <option key={v.voice_id} value={v.voice_id}>
+                                  {v.name} {v.category === 'cloned' ? '(Custom)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                            {member.elevenLabsVoiceId && (
+                              <button
+                                onClick={() => {
+                                  const voice = state.elevenLabsVoices.find(v => v.voice_id === member.elevenLabsVoiceId);
+                                  if (voice?.preview_url) {
+                                    const audio = new Audio(voice.preview_url);
+                                    audio.play();
+                                  }
+                                }}
+                                className="px-2 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs flex items-center gap-1"
+                                title="Preview voice"
+                              >
+                                <Play size={12} fill="currentColor" />
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <select
+                              value={member.voice}
+                              onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                              className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none"
+                            >
+                              {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                            </select>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const base64 = await generateSpeech("Hello, this is a voice preview.", member.voice, '', '', state.geminiApiKey);
+                                  const ctx = getAudioContext();
+                                  const buffer = await decodeRawPCM(base64, ctx);
+                                  const source = ctx.createBufferSource();
+                                  source.buffer = buffer;
+                                  source.connect(ctx.destination);
+                                  source.start();
+                                } catch (e) {
+                                  console.error("Preview failed:", e);
+                                }
+                              }}
+                              disabled={!state.geminiApiKey}
+                              className="px-2 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded text-xs flex items-center gap-1 disabled:opacity-30"
+                              title="Preview voice (requires API key)"
+                            >
+                              <Play size={12} fill="currentColor" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
 
                     {/* Voice Prompt Editor */}

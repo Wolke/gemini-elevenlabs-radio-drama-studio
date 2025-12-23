@@ -1,15 +1,14 @@
 
-import React, { useState, useRef } from 'react';
-import { DramaState, ItemType, ScriptItem, CastMember, SceneDefinition } from './types';
-import { generateScriptFromStory, generateSpeech, generateCharacterSheet, generateSceneImage } from './services/geminiService';
-import { generateElevenLabsSfx, generateElevenLabsSpeech } from './services/elevenLabsService';
+import React, { useState, useRef, useEffect } from 'react';
+import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType } from './types';
+import { generateScriptFromStory, generateSpeech } from './services/geminiService';
+import { generateElevenLabsSfx, generateElevenLabsSpeech, fetchElevenLabsVoices } from './services/elevenLabsService';
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
-import { generateVideoFromScript } from './utils/videoUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, User, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Download, Save, FolderOpen, Upload, ImageIcon, Video, RefreshCw, Pencil, Palette, Smartphone, Monitor, ImagePlus, Mic, Mic2, MapPin } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw } from 'lucide-react';
 
-const VOICES = [
+const GEMINI_VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir",
   "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
   "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina",
@@ -17,15 +16,6 @@ const VOICES = [
   "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
   "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
 ].sort();
-
-const PRESET_STYLES = [
-  "Cinematic Realistic",
-  "Anime / Manga",
-  "Watercolor Picture Book",
-  "Cyberpunk / Neon",
-  "Vintage Noir",
-  "3D Animation Style"
-];
 
 const isNarrator = (name: string) => {
   const n = name.trim().toLowerCase();
@@ -41,35 +31,36 @@ export default function App() {
     isGeneratingScript: false,
     isPlaying: false,
     currentPlayingId: null,
-    enableSfx: false,
-    includeNarrator: true, // Default to having a narrator
-    enableImages: true,
-    imageStyle: "Cinematic Realistic",
-    aspectRatio: "16:9",
+    enableSfx: true,
+    includeNarrator: true,
     geminiApiKey: '',
     elevenLabsApiKey: '',
-    useElevenLabsForSpeech: false,
+    useElevenLabsForSpeech: true,
+    elevenLabsVoices: [],
+    isLoadingVoices: false,
   });
 
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
-  const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isVideoExporting, setIsVideoExporting] = useState(false);
-  const [videoExportProgress, setVideoExportProgress] = useState("");
   const [isProjectLoading, setIsProjectLoading] = useState(false);
-  const [customStyle, setCustomStyle] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Ref for file inputs
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const imageUploadRef = useRef<HTMLInputElement>(null);
-  const uploadTargetRef = useRef<{ type: 'cast' | 'scene', name: string } | null>(null);
 
-  // Computed state: Check if all non-narrator cast members have images
-  const allCastReady = state.cast
-    .filter(c => !isNarrator(c.name))
-    .every(c => !!c.imageUrl);
+  // Fetch ElevenLabs voices when API key changes
+  const handleFetchVoices = async () => {
+    if (!state.elevenLabsApiKey) return;
+
+    setState(prev => ({ ...prev, isLoadingVoices: true }));
+    try {
+      const voices = await fetchElevenLabsVoices(state.elevenLabsApiKey);
+      setState(prev => ({ ...prev, elevenLabsVoices: voices, isLoadingVoices: false }));
+    } catch (e: any) {
+      setError(`Failed to fetch voices: ${e.message}`);
+      setState(prev => ({ ...prev, isLoadingVoices: false }));
+    }
+  };
 
   const handleGenerateScript = async () => {
     if (!state.storyText.trim()) return;
@@ -78,169 +69,14 @@ export default function App() {
     setState(prev => ({ ...prev, isGeneratingScript: true }));
 
     try {
-      // 1. Generate Script text with Narrator flag
       const { cast, scenes, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator, state.geminiApiKey);
-
-      // Update state immediately with text
       setState(prev => ({ ...prev, cast, scenes, items, isGeneratingScript: false }));
       setIsConfigExpanded(false);
-
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
       setState(prev => ({ ...prev, isGeneratingScript: false }));
     }
   };
-
-  const handleGenerateAllCastImages = async () => {
-    if (state.cast.length === 0) return;
-    setIsGeneratingImages(true);
-
-    // Filter members who need images AND are NOT narrators
-    const membersToProcess = state.cast.filter(m =>
-      !m.imageUrl &&
-      m.visualDescription &&
-      !isNarrator(m.name)
-    );
-
-    for (const member of membersToProcess) {
-      await handleGenerateCastImage(member.name, member.visualDescription!);
-      await new Promise(r => setTimeout(r, 1500));
-    }
-
-    setIsGeneratingImages(false);
-  };
-
-  const handleGenerateAllSceneImages = async () => {
-    if (state.items.length === 0) return;
-
-    // Strictly enforce cast readiness
-    if (!allCastReady) {
-      alert("Please generate all character portraits before generating scene images.");
-      return;
-    }
-
-    setIsGeneratingImages(true);
-
-    const itemsToProcess = state.items.filter(item => {
-      // Skip if already has image
-      if (item.imageUrl) return false;
-      return true;
-    });
-
-    for (const item of itemsToProcess) {
-      // Re-use logic from single item generation to ensure consistency
-      // This will look up item.location and use that scene description/image
-      let prompt = "";
-      if (item.type === ItemType.SPEECH) {
-        // Include text content to capture actions/context described in dialogue or narration
-        const content = item.text || "";
-        if (item.character && isNarrator(item.character)) {
-          // For Narrator, the text contains the action description
-          prompt = `Visual event: "${content}". Atmosphere: ${item.expression || 'dramatic'}`;
-        } else {
-          // For characters, focus on their presence + dialogue context
-          prompt = `Character: ${item.character}. Action/Context derived from dialogue: "${content}". Expression: ${item.expression || 'dramatic'}`;
-        }
-      } else {
-        // SFX
-        prompt = `Visual representation of sound effect: "${item.sfxDescription}"`;
-      }
-
-      await handleGenerateItemImage(item.id, prompt);
-      await new Promise(r => setTimeout(r, 2000));
-    }
-    setIsGeneratingImages(false);
-  };
-
-  const handleGenerateCastImage = async (name: string, description: string) => {
-    // Set loading state
-    setState(prev => ({
-      ...prev,
-      cast: prev.cast.map(c => c.name === name ? { ...c, isGeneratingVisual: true } : c)
-    }));
-
-    try {
-      const finalStyle = customStyle || state.imageStyle;
-      const b64 = await generateCharacterSheet(description, finalStyle, state.geminiApiKey);
-
-      setState(prev => ({
-        ...prev,
-        cast: prev.cast.map(c => c.name === name ? { ...c, imageUrl: b64, isGeneratingVisual: false } : c)
-      }));
-    } catch (e) {
-      console.error(`Failed gen image for ${name}`, e);
-      setState(prev => ({
-        ...prev,
-        cast: prev.cast.map(c => c.name === name ? { ...c, isGeneratingVisual: false } : c)
-      }));
-    }
-  };
-
-  const handleGenerateMasterSceneImage = async (sceneName: string, description: string) => {
-    setState(prev => ({
-      ...prev,
-      scenes: prev.scenes.map(s => s.name === sceneName ? { ...s, isGeneratingVisual: true } : s)
-    }));
-
-    try {
-      const finalStyle = customStyle || state.imageStyle;
-      // Master scenes are just empty backgrounds
-      const b64 = await generateSceneImage(description, finalStyle, state.aspectRatio, undefined, undefined, state.geminiApiKey);
-
-      setState(prev => ({
-        ...prev,
-        scenes: prev.scenes.map(s => s.name === sceneName ? { ...s, imageUrl: b64, isGeneratingVisual: false } : s)
-      }));
-    } catch (e) {
-      console.error(e);
-      setState(prev => ({
-        ...prev,
-        scenes: prev.scenes.map(s => s.name === sceneName ? { ...s, isGeneratingVisual: false } : s)
-      }));
-    }
-  };
-
-  // --- Image Upload Logic ---
-  const triggerImageUpload = (type: 'cast' | 'scene', name: string) => {
-    uploadTargetRef.current = { type, name };
-    imageUploadRef.current?.click();
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !uploadTargetRef.current) return;
-
-    const target = uploadTargetRef.current;
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      // Extract base64 data (remove "data:image/xxx;base64," prefix for consistency with generated images)
-      let base64Data = result;
-      if (result.includes(',')) {
-        base64Data = result.split(',')[1];
-      }
-
-      if (target.type === 'cast') {
-        setState(prev => ({
-          ...prev,
-          cast: prev.cast.map(c => c.name === target.name ? { ...c, imageUrl: base64Data } : c)
-        }));
-      } else if (target.type === 'scene') {
-        setState(prev => ({
-          ...prev,
-          scenes: prev.scenes.map(s => s.name === target.name ? { ...s, imageUrl: base64Data } : s)
-        }));
-      }
-
-      // Reset
-      if (imageUploadRef.current) imageUploadRef.current.value = '';
-      uploadTargetRef.current = null;
-    };
-
-    reader.readAsDataURL(file);
-  };
-  // --------------------------
 
   const handleUpdateItem = (id: string, updates: Partial<ScriptItem>) => {
     setState(prev => ({
@@ -279,10 +115,20 @@ export default function App() {
       const ctx = getAudioContext();
       let buffer: AudioBuffer;
 
-      if (state.useElevenLabsForSpeech && state.elevenLabsApiKey) {
-        const base64 = await generateElevenLabsSpeech(text, voice, state.elevenLabsApiKey);
+      // Find character to get voice settings
+      const item = state.items.find(i => i.id === id);
+      const castMember = item?.character ? state.cast.find(c => c.name === item.character) : undefined;
+
+      if (castMember?.voiceType === 'elevenlabs' && state.elevenLabsApiKey) {
+        // Use ElevenLabs with specific voice ID
+        const base64 = await generateElevenLabsSpeech(text, castMember.elevenLabsVoiceId, voice, state.elevenLabsApiKey);
+        buffer = await decodeAudioFile(base64, ctx);
+      } else if (state.useElevenLabsForSpeech && state.elevenLabsApiKey) {
+        // Use ElevenLabs with mapped Gemini voice
+        const base64 = await generateElevenLabsSpeech(text, undefined, voice, state.elevenLabsApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else {
+        // Use Gemini TTS
         const base64 = await generateSpeech(text, voice, expression, state.geminiApiKey);
         buffer = await decodeRawPCM(base64, ctx);
       }
@@ -327,95 +173,6 @@ export default function App() {
     }
   };
 
-  const handleGenerateItemImage = async (id: string, basePrompt: string) => {
-    handleUpdateItem(id, { isGeneratingVisual: true });
-    try {
-      const item = state.items.find(i => i.id === id);
-      if (!item) return;
-
-      let sceneRef: string | undefined = undefined;
-      let finalPrompt = basePrompt;
-
-      // 1. Find the Location (Scene) definition
-      const sceneDef = state.scenes.find(s => s.name === item.location);
-
-      // 2. Find ALL characters mentioned in this item
-      // Get the text content to analyze
-      const textToAnalyze = item.text || item.sfxDescription || basePrompt;
-
-      // Find all characters that are mentioned in the text (excluding narrators)
-      const mentionedCharacters = state.cast.filter(c => {
-        if (isNarrator(c.name)) return false; // Skip narrators
-        if (!c.imageUrl) return false; // Skip characters without images
-        // Check if character name appears in the text
-        return textToAnalyze.includes(c.name);
-      });
-
-      // For non-narrator speech, always include the speaking character
-      const isSpeech = item.type === ItemType.SPEECH;
-      const isNarratorLine = item.character && isNarrator(item.character);
-
-      if (isSpeech && !isNarratorLine && item.character) {
-        const speakingChar = state.cast.find(c => c.name === item.character);
-        if (speakingChar && speakingChar.imageUrl) {
-          // Add speaking character if not already in list
-          const alreadyIncluded = mentionedCharacters.some(c => c.name === speakingChar.name);
-          if (!alreadyIncluded) {
-            mentionedCharacters.unshift(speakingChar); // Add to beginning
-          }
-        }
-      }
-
-      // Build character references array
-      const characterRefs: { name: string; base64: string }[] = mentionedCharacters.map(c => ({
-        name: c.name,
-        base64: c.imageUrl!
-      }));
-
-      if (characterRefs.length > 0) {
-        console.log(`[Image Gen] Using ${characterRefs.length} character reference(s): ${characterRefs.map(c => c.name).join(', ')}`);
-      } else {
-        console.log(`[Image Gen] No character references found for this item`);
-      }
-
-      // 3. Get scene reference (if available)
-      if (sceneDef && sceneDef.imageUrl) {
-        sceneRef = sceneDef.imageUrl;
-        console.log(`[Image Gen] Using scene reference for location: ${sceneDef.name}`);
-      }
-
-      // Include scene info in prompt:
-      // - If we have a background image, just mention the location name (let image do the work)
-      // - If NO background image, include full text description as fallback
-      if (sceneDef) {
-        if (sceneRef) {
-          // Has background image - minimal text, rely on image reference
-          finalPrompt += `. Location: ${sceneDef.name}`;
-        } else {
-          // No background image - need full text description
-          finalPrompt += `. Location: ${sceneDef.name}. Environment details: ${sceneDef.visualDescription}`;
-        }
-      }
-
-      const finalStyle = customStyle || state.imageStyle;
-
-      // Pass all character references and scene reference
-      const b64 = await generateSceneImage(
-        finalPrompt,
-        finalStyle,
-        state.aspectRatio,
-        characterRefs.length > 0 ? characterRefs : undefined,
-        sceneRef,
-        state.geminiApiKey
-      );
-
-      handleUpdateItem(id, { imageUrl: b64, isGeneratingVisual: false });
-    } catch (e: any) {
-      console.error(e);
-      handleUpdateItem(id, { isGeneratingVisual: false, generationError: "Image Gen Failed" });
-    }
-  };
-
   const handleGenerateAllAudio = async () => {
     if (state.items.length === 0) return;
     setIsGeneratingAll(true);
@@ -431,7 +188,6 @@ export default function App() {
       } else if (item.type === ItemType.SFX && item.sfxDescription) {
         await handleGenerateSfx(item.id, item.sfxDescription);
       }
-      // Small delay to be nice to API
       await new Promise(r => setTimeout(r, 500));
     }
     setIsGeneratingAll(false);
@@ -440,7 +196,6 @@ export default function App() {
   const handleExportWav = async () => {
     setIsExporting(true);
     try {
-      // Filter items that have audio buffers
       const buffers = state.items
         .map(i => i.audioBuffer)
         .filter((b): b is AudioBuffer => !!b);
@@ -457,7 +212,7 @@ export default function App() {
 
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'radio_drama.wav';
+      a.download = 'voice_drama.wav';
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -468,37 +223,7 @@ export default function App() {
     }
   };
 
-  const handleExportVideo = async () => {
-    setIsVideoExporting(true);
-    setVideoExportProgress("Initializing...");
-    try {
-      const blob = await generateVideoFromScript(
-        state.items,
-        state.cast,
-        state.scenes,
-        state.aspectRatio,
-        (msg) => setVideoExportProgress(msg)
-      );
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'radio_drama_video.webm';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-      alert("Video generation failed. Ensure you have generated images and audio first.");
-    } finally {
-      setIsVideoExporting(false);
-      setVideoExportProgress("");
-    }
-  };
-
-  // --- Project Save/Load Logic ---
-
   const handleSaveProject = async () => {
-    // We need to convert AudioBuffers to Base64 to save them
     const itemsToSave = await Promise.all(state.items.map(async (item) => {
       let audioBase64 = undefined;
       if (item.audioBuffer) {
@@ -507,13 +232,13 @@ export default function App() {
       }
       return {
         ...item,
-        audioBuffer: undefined, // Don't save circular object
-        _audioBase64: audioBase64 // Save encoded
+        audioBuffer: undefined,
+        _audioBase64: audioBase64
       };
     }));
 
     const projectData = {
-      version: 1.1,
+      version: 2.0,
       date: new Date().toISOString(),
       storyText: state.storyText,
       cast: state.cast,
@@ -521,10 +246,7 @@ export default function App() {
       items: itemsToSave,
       config: {
         enableSfx: state.enableSfx,
-        enableImages: state.enableImages,
         includeNarrator: state.includeNarrator,
-        imageStyle: state.imageStyle,
-        aspectRatio: state.aspectRatio,
         useElevenLabsForSpeech: state.useElevenLabsForSpeech
       }
     };
@@ -533,7 +255,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'gemini_drama_project.json';
+    a.download = 'voice_drama_project.json';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -548,7 +270,6 @@ export default function App() {
       try {
         const json = JSON.parse(event.target?.result as string);
 
-        // Restore items
         const ctx = getAudioContext();
         const restoredItems = await Promise.all(json.items.map(async (item: any) => {
           let audioBuffer = null;
@@ -567,12 +288,9 @@ export default function App() {
           cast: json.cast || [],
           scenes: json.scenes || [],
           items: restoredItems,
-          enableSfx: json.config?.enableSfx ?? false,
+          enableSfx: json.config?.enableSfx ?? true,
           includeNarrator: json.config?.includeNarrator ?? true,
-          enableImages: json.config?.enableImages ?? true,
-          imageStyle: json.config?.imageStyle || "Cinematic Realistic",
-          aspectRatio: json.config?.aspectRatio || "16:9",
-          useElevenLabsForSpeech: json.config?.useElevenLabsForSpeech ?? false,
+          useElevenLabsForSpeech: json.config?.useElevenLabsForSpeech ?? true,
           isPlaying: false,
           currentPlayingId: null
         }));
@@ -595,18 +313,16 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 p-4 md:p-8 max-w-5xl mx-auto">
 
-      {/* Hidden File Inputs */}
       <input type="file" ref={fileInputRef} onChange={handleLoadProject} accept=".json" className="hidden" />
-      <input type="file" ref={imageUploadRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
 
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-amber-200 bg-clip-text text-transparent flex items-center gap-2">
-            <Sparkles className="text-amber-200" />
-            Gemini Radio Drama Studio
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
+            <Sparkles className="text-blue-400" />
+            Voice Drama Studio
           </h1>
-          <p className="text-zinc-500 text-sm mt-1">Convert stories into full-cast audio dramas with AI visuals</p>
+          <p className="text-zinc-500 text-sm mt-1">Powered by ElevenLabs + Google Cloud Gemini</p>
         </div>
 
         <div className="flex gap-2">
@@ -640,12 +356,12 @@ export default function App() {
                 value={state.storyText}
                 onChange={(e) => setState(prev => ({ ...prev, storyText: e.target.value }))}
                 placeholder="Paste your story or scene description here..."
-                className="w-full h-40 bg-black/40 border border-zinc-700 rounded-lg p-4 text-sm focus:outline-none focus:border-indigo-500 resize-none"
+                className="w-full h-40 bg-black/40 border border-zinc-700 rounded-lg p-4 text-sm focus:outline-none focus:border-blue-500 resize-none"
               />
               <button
                 onClick={handleGenerateScript}
                 disabled={state.isGeneratingScript || !state.storyText.trim()}
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
                 Generate Script & Cast
@@ -659,78 +375,54 @@ export default function App() {
               </h3>
 
               <div className="space-y-4">
-                {/* Image Enable Toggle */}
-                <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                {/* ElevenLabs API Key - Primary */}
+                <div className="p-3 bg-blue-500/5 rounded-lg border border-blue-500/20 space-y-3">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-pink-500/10 text-pink-400 rounded-md">
-                      <ImageIcon size={18} />
+                    <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
+                      <Key size={18} />
                     </div>
                     <div>
-                      <p className="text-sm font-medium">Character & Scene Images</p>
-                      <p className="text-xs text-zinc-500">Enable visual generation</p>
+                      <p className="text-sm font-medium text-blue-300">ElevenLabs API Key</p>
+                      <p className="text-xs text-zinc-500">Required for voice & SFX generation</p>
                     </div>
                   </div>
-                  <button onClick={() => setState(prev => ({ ...prev, enableImages: !prev.enableImages }))}>
-                    {state.enableImages ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
-                  </button>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="Enter your ElevenLabs API Key..."
+                      value={state.elevenLabsApiKey}
+                      onChange={(e) => setState(prev => ({ ...prev, elevenLabsApiKey: e.target.value }))}
+                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      onClick={handleFetchVoices}
+                      disabled={!state.elevenLabsApiKey || state.isLoadingVoices}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {state.isLoadingVoices ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                      Fetch Voices
+                    </button>
+                  </div>
+                  {state.elevenLabsVoices.length > 0 && (
+                    <p className="text-xs text-blue-400">✓ {state.elevenLabsVoices.length} voices loaded</p>
+                  )}
                 </div>
 
-                {/* Image Configuration (Conditional) */}
-                {state.enableImages && (
-                  <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-4 animate-in fade-in">
-                    {/* Aspect Ratio */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs text-zinc-500 font-semibold uppercase flex items-center gap-1">
-                        <Monitor size={12} /> Aspect Ratio
-                      </label>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setState(prev => ({ ...prev, aspectRatio: "16:9" }))}
-                          className={`flex-1 py-1.5 px-3 rounded text-xs border ${state.aspectRatio === "16:9" ? "bg-indigo-600 border-indigo-500 text-white" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}
-                        >
-                          <Monitor size={14} className="inline mr-1" /> General (16:9)
-                        </button>
-                        <button
-                          onClick={() => setState(prev => ({ ...prev, aspectRatio: "9:16" }))}
-                          className={`flex-1 py-1.5 px-3 rounded text-xs border ${state.aspectRatio === "9:16" ? "bg-indigo-600 border-indigo-500 text-white" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}
-                        >
-                          <Smartphone size={14} className="inline mr-1" /> Mobile (9:16)
-                        </button>
-                      </div>
+                {/* Use ElevenLabs for Speech Toggle */}
+                <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
+                      <Volume2 size={18} />
                     </div>
-
-                    {/* Image Style */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs text-zinc-500 font-semibold uppercase flex items-center gap-1">
-                        <Palette size={12} /> Visual Style
-                      </label>
-                      <select
-                        value={state.imageStyle}
-                        onChange={(e) => {
-                          setState(prev => ({ ...prev, imageStyle: e.target.value }));
-                          if (e.target.value !== "Custom") setCustomStyle("");
-                        }}
-                        className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-2 text-xs focus:outline-none"
-                      >
-                        {PRESET_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
-                        <option value="Custom">Custom...</option>
-                      </select>
-
-                      {(state.imageStyle === "Custom" || customStyle) && (
-                        <input
-                          type="text"
-                          value={customStyle}
-                          onChange={(e) => {
-                            setCustomStyle(e.target.value);
-                            setState(prev => ({ ...prev, imageStyle: "Custom" }));
-                          }}
-                          placeholder="Enter custom art style..."
-                          className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-2 text-xs focus:outline-none focus:border-indigo-500"
-                        />
-                      )}
+                    <div>
+                      <p className="text-sm font-medium">Use ElevenLabs for Voices</p>
+                      <p className="text-xs text-zinc-500">High-quality multilingual TTS</p>
                     </div>
                   </div>
-                )}
+                  <button onClick={() => setState(prev => ({ ...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech }))} disabled={!state.elevenLabsApiKey}>
+                    {state.useElevenLabsForSpeech ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                  </button>
+                </div>
 
                 {/* Narrator Toggle */}
                 <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-zinc-800/50">
@@ -744,7 +436,7 @@ export default function App() {
                     </div>
                   </div>
                   <button onClick={() => setState(prev => ({ ...prev, includeNarrator: !prev.includeNarrator }))}>
-                    {state.includeNarrator ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                    {state.includeNarrator ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
                   </button>
                 </div>
 
@@ -756,11 +448,11 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm font-medium">Sound Effects</p>
-                      <p className="text-xs text-zinc-500">Include SFX cues</p>
+                      <p className="text-xs text-zinc-500">Include SFX cues (ElevenLabs)</p>
                     </div>
                   </div>
                   <button onClick={() => setState(prev => ({ ...prev, enableSfx: !prev.enableSfx }))}>
-                    {state.enableSfx ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                    {state.enableSfx ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
                   </button>
                 </div>
 
@@ -772,7 +464,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm font-medium">Gemini API Key</p>
-                      <p className="text-xs text-zinc-500">Required for AI generation</p>
+                      <p className="text-xs text-zinc-500">For script generation (& fallback TTS)</p>
                     </div>
                   </div>
                   <input
@@ -781,31 +473,6 @@ export default function App() {
                     value={state.geminiApiKey}
                     onChange={(e) => setState(prev => ({ ...prev, geminiApiKey: e.target.value }))}
                     className="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
-                  />
-                  <p className="text-xs text-zinc-600">Leave empty to use environment variable (API_KEY)</p>
-                </div>
-
-                {/* ElevenLabs Config */}
-                <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
-                        <Key size={18} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">ElevenLabs API (Optional)</p>
-                      </div>
-                    </div>
-                    <button onClick={() => setState(prev => ({ ...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech }))} disabled={!state.elevenLabsApiKey}>
-                      {state.useElevenLabsForSpeech ? <ToggleRight size={28} className="text-indigo-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
-                    </button>
-                  </div>
-                  <input
-                    type="password"
-                    placeholder="API Key"
-                    value={state.elevenLabsApiKey}
-                    onChange={(e) => setState(prev => ({ ...prev, elevenLabsApiKey: e.target.value }))}
-                    className="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs"
                   />
                 </div>
               </div>
@@ -818,158 +485,79 @@ export default function App() {
       {state.cast.length > 0 && (
         <main className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
 
-          {/* Left Column: Cast & Scenes */}
-          <section className="lg:col-span-1 space-y-8">
+          {/* Left Column: Cast */}
+          <section className="lg:col-span-1 space-y-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Users size={18} className="text-blue-400" /> Cast & Voices
+            </h2>
 
-            {/* Scenes List */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <MapPin size={18} className="text-indigo-400" /> Scenes
-                </h2>
-              </div>
-              {state.scenes.length === 0 && (
-                <div className="text-xs text-zinc-500 italic p-2 border border-zinc-800 rounded">No specific scenes identified. Script will use general visuals.</div>
-              )}
-              <div className="space-y-3">
-                {state.scenes.map((scene, idx) => (
-                  <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col gap-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-20 h-16 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700 relative group flex items-center justify-center text-zinc-600">
-                        {scene.imageUrl ? (
-                          <img src={`data:image/png;base64,${scene.imageUrl}`} className="w-full h-full object-cover" alt={scene.name} />
-                        ) : (
-                          <ImageIcon size={20} />
-                        )}
-                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity">
-                          <button
-                            onClick={() => handleGenerateMasterSceneImage(scene.name, scene.visualDescription)}
-                            disabled={scene.isGeneratingVisual}
-                            className="text-white hover:text-indigo-400"
-                            title="Generate"
-                          >
-                            {scene.isGeneratingVisual ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                          </button>
-                          <button
-                            onClick={() => triggerImageUpload('scene', scene.name)}
-                            className="text-white hover:text-indigo-400"
-                            title="Upload"
-                          >
-                            <Upload size={16} />
-                          </button>
-                        </div>
+            <div className="space-y-3">
+              {state.cast.map((member, idx) => {
+                const isNarratorMember = isNarrator(member.name);
+                return (
+                  <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isNarratorMember ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                        <Mic size={18} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-sm text-white truncate">{scene.name}</h4>
-                        <p className="text-[10px] text-zinc-500 line-clamp-3">{scene.visualDescription}</p>
+                        <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
+                        <p className="text-xs text-zinc-500 truncate">{member.description}</p>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
 
-            {/* Cast List */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Users size={18} className="text-indigo-400" /> Cast
-                </h2>
-                {state.enableImages && (
-                  <button
-                    onClick={handleGenerateAllCastImages}
-                    disabled={isGeneratingImages}
-                    className="flex items-center gap-2 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] font-medium transition-colors"
-                  >
-                    {isGeneratingImages ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
-                    Generate All Portraits
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                {state.cast.map((member, idx) => {
-                  const isNarratorMember = isNarrator(member.name);
-                  return (
-                    <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col gap-3">
-                      <div className="flex items-start gap-3">
-                        {/* Cast Portrait */}
-                        <div className="w-24 h-24 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700 relative group flex items-center justify-center text-zinc-600">
-                          {member.imageUrl ? (
-                            <img src={`data:image/png;base64,${member.imageUrl}`} className="w-full h-full object-cover" alt={member.name} />
-                          ) : (
-                            isNarratorMember ? <Mic size={24} className="text-zinc-500" /> : <User size={24} />
-                          )}
-
-                          {!isNarratorMember && (
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity">
-                              <button
-                                onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
-                                disabled={member.isGeneratingVisual}
-                                className="text-white hover:text-indigo-400"
-                                title="Generate"
-                              >
-                                {member.isGeneratingVisual ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
-                              </button>
-                              <button
-                                onClick={() => triggerImageUpload('cast', member.name)}
-                                className="text-white hover:text-indigo-400"
-                                title="Upload"
-                              >
-                                <Upload size={20} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex-1 min-w-0 space-y-2">
-                          <div>
-                            <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
-                            <p className="text-xs text-zinc-500 truncate">{member.description}</p>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1">
-                              <select
-                                value={member.voice}
-                                onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
-                                className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-[10px] focus:outline-none"
-                              >
-                                {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                              </select>
-                            </div>
-                          </div>
-                        </div>
+                    {/* Voice Selection */}
+                    <div className="space-y-2">
+                      {/* Voice Type Selector */}
+                      <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                        <button
+                          onClick={() => handleUpdateCast(member.name, { voiceType: 'gemini' })}
+                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                        >
+                          Gemini
+                        </button>
+                        <button
+                          onClick={() => handleUpdateCast(member.name, { voiceType: 'elevenlabs' })}
+                          disabled={state.elevenLabsVoices.length === 0}
+                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
+                        >
+                          ElevenLabs
+                        </button>
                       </div>
 
-                      {/* Visual Description Edit */}
-                      {!isNarratorMember && (
-                        <div className="bg-zinc-950/50 rounded p-2 border border-zinc-800/50 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-zinc-500 font-semibold uppercase flex items-center gap-1">
-                              <ImageIcon size={10} /> Visual Prompt
-                            </span>
-                            <button
-                              onClick={() => handleGenerateCastImage(member.name, member.visualDescription || '')}
-                              disabled={member.isGeneratingVisual || !member.visualDescription}
-                              className="text-[10px] bg-zinc-800 hover:bg-indigo-600 text-zinc-300 hover:text-white px-2 py-0.5 rounded transition-colors flex items-center gap-1"
-                            >
-                              {member.isGeneratingVisual ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
-                              Generate
-                            </button>
-                          </div>
-                          <textarea
-                            value={member.visualDescription || ''}
-                            onChange={(e) => handleUpdateCast(member.name, { visualDescription: e.target.value })}
-                            className="w-full bg-transparent text-[11px] text-zinc-400 focus:text-zinc-200 focus:outline-none resize-none leading-tight h-12"
-                            placeholder="Describe character appearance..."
-                          />
-                        </div>
+                      {/* Voice Dropdown */}
+                      {member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
+                        <select
+                          value={member.elevenLabsVoiceId || ''}
+                          onChange={(e) => {
+                            const voice = state.elevenLabsVoices.find(v => v.voice_id === e.target.value);
+                            handleUpdateCast(member.name, {
+                              elevenLabsVoiceId: e.target.value,
+                              voice: voice?.name || member.voice
+                            });
+                          }}
+                          className="w-full bg-zinc-950 border border-blue-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="">Select ElevenLabs Voice...</option>
+                          {state.elevenLabsVoices.map(v => (
+                            <option key={v.voice_id} value={v.voice_id}>
+                              {v.name} {v.category === 'cloned' ? '(Custom)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <select
+                          value={member.voice}
+                          onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                          className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none"
+                        >
+                          {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
                       )}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
 
@@ -977,32 +565,16 @@ export default function App() {
           <section className="lg:col-span-2 space-y-4">
             <div className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-sm py-4 border-b border-zinc-800 flex items-center justify-between">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                <FileText size={18} className="text-indigo-400" /> Script ({state.items.length} cues)
+                <FileText size={18} className="text-blue-400" /> Script ({state.items.length} cues)
               </h2>
-              <div className="flex gap-2">
-                {state.enableImages && (
-                  <button
-                    onClick={handleGenerateAllSceneImages}
-                    disabled={isGeneratingImages || !allCastReady}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-2 ${allCastReady
-                      ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
-                      : 'bg-zinc-900 text-zinc-600 cursor-not-allowed border border-zinc-800'
-                      }`}
-                    title={!allCastReady ? "Generate all character portraits first" : ""}
-                  >
-                    {isGeneratingImages ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-                    Generate All Scenes
-                  </button>
-                )}
-                <button
-                  onClick={handleGenerateAllAudio}
-                  disabled={isGeneratingAll}
-                  className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
-                >
-                  {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
-                  Generate All Audio
-                </button>
-              </div>
+              <button
+                onClick={handleGenerateAllAudio}
+                disabled={isGeneratingAll}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+              >
+                {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+                Generate All Audio
+              </button>
             </div>
 
             <div className="space-y-4">
@@ -1015,17 +587,13 @@ export default function App() {
                     index={index}
                     totalItems={state.items.length}
                     assignedVoice={castMember?.voice}
-                    characterImageUrl={castMember?.imageUrl}
-                    allCastReady={allCastReady} // Pass global readiness
+                    voiceType={castMember?.voiceType}
                     elevenLabsApiKey={state.elevenLabsApiKey}
-                    enableImages={state.enableImages}
-                    aspectRatio={state.aspectRatio}
                     onUpdate={handleUpdateItem}
                     onRemove={handleRemoveItem}
                     onMove={handleMoveItem}
                     onGenerateAudio={handleGenerateAudio}
                     onGenerateSfx={handleGenerateSfx}
-                    onGenerateImage={handleGenerateItemImage}
                     onPreviewAudio={(buffer) => {
                       const ctx = getAudioContext();
                       const source = ctx.createBufferSource();
@@ -1053,7 +621,7 @@ export default function App() {
                 onClick={togglePlay}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${state.isPlaying
                   ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                  : 'bg-emerald-500 text-black hover:bg-emerald-400 hover:scale-105'
+                  : 'bg-blue-500 text-black hover:bg-blue-400 hover:scale-105'
                   }`}
               >
                 {state.isPlaying ? <Square size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
@@ -1068,25 +636,14 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleExportWav}
-                disabled={isExporting}
-                className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-medium transition-colors border border-zinc-700"
-              >
-                {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                WAV
-              </button>
-
-              <button
-                onClick={handleExportVideo}
-                disabled={isVideoExporting}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg hover:shadow-indigo-500/25"
-              >
-                {isVideoExporting ? <Loader2 size={16} className="animate-spin" /> : <Video size={16} />}
-                {isVideoExporting ? (videoExportProgress || 'Exporting...') : `Video (${state.aspectRatio})`}
-              </button>
-            </div>
+            <button
+              onClick={handleExportWav}
+              disabled={isExporting}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg hover:shadow-blue-500/25"
+            >
+              {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              Export WAV
+            </button>
 
           </div>
         </div>

@@ -1,41 +1,75 @@
 
 // Service for interacting with ElevenLabs API
 
+import { ElevenLabsVoice } from '../types';
+
 // Mapping of some Gemini archetype vibes to ElevenLabs Pre-made Voice IDs
-// This ensures that if the user selects "Puck" (Upbeat), we get a somewhat compatible EL voice.
+// Used as fallback when no specific ElevenLabs voice is selected
 const VOICE_MAPPING: Record<string, string> = {
   // Default fallback (Antoni - Balanced)
-  'default': 'ErXwobaYiN019PkySvjV', 
-  
+  'default': 'ErXwobaYiN019PkySvjV',
+
   // Masculine / Deep
   'Charon': 'TxGEqnHWrfWFTfGW9XjX', // Josh
   'Fenrir': 'TxGEqnHWrfWFTfGW9XjX', // Josh
   'Alnilam': 'TxGEqnHWrfWFTfGW9XjX', // Josh
-  
+
   // Feminine / Soft
   'Kore': 'EXAVITQu4vr4xnSDxMaL', // Bella
   'Achernar': 'EXAVITQu4vr4xnSDxMaL', // Bella
   'Leda': '21m00Tcm4TlvDq8ikWAM', // Rachel
-  
+
   // Energetic / Bright
   'Zephyr': 'pFZP5JQG7iQjIQuC4Bku', // Lily
   'Puck': 'pFZP5JQG7iQjIQuC4Bku', // Lily
-  
+
   // Mature / Narrative
   'Gacrux': 'ODq5zmih8GrVes37Dizj', // Patrick
   'Rasalgethi': 'ODq5zmih8GrVes37Dizj', // Patrick
 };
 
-function getVoiceId(geminiVoiceName: string): string {
+function getVoiceIdFromGeminiName(geminiVoiceName: string): string {
   return VOICE_MAPPING[geminiVoiceName] || VOICE_MAPPING['default'];
 }
 
+/**
+ * Fetch all available voices from ElevenLabs account
+ * Includes pre-made voices and user's custom trained voices
+ */
+export async function fetchElevenLabsVoices(apiKey: string): Promise<ElevenLabsVoice[]> {
+  console.log("--- [ElevenLabs] Fetching Voices ---");
+
+  const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+    method: 'GET',
+    headers: {
+      'xi-api-key': apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(`ElevenLabs Voices Error: ${err.detail?.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  const voices: ElevenLabsVoice[] = (data.voices || []).map((v: any) => ({
+    voice_id: v.voice_id,
+    name: v.name,
+    category: v.category,
+    labels: v.labels,
+    preview_url: v.preview_url,
+  }));
+
+  console.log(`[ElevenLabs] Found ${voices.length} voices`);
+  return voices;
+}
+
 export const generateElevenLabsSfx = async (
-  text: string, 
-  durationSeconds: number = 4, 
+  text: string,
+  durationSeconds: number = 4,
   apiKey: string
 ): Promise<string> => {
-  
+
   console.log("--- [ElevenLabs] Generate SFX Prompt ---");
   console.log(text);
   console.log("----------------------------------------");
@@ -65,20 +99,29 @@ export const generateElevenLabsSfx = async (
   return arrayBufferToBase64(arrayBuffer);
 };
 
+/**
+ * Generate speech using ElevenLabs TTS
+ * @param text - Text to speak
+ * @param voiceId - Direct ElevenLabs voice ID (when user selected specific voice)
+ * @param geminiVoiceName - Fallback Gemini voice name (for mapping when no specific ID)
+ * @param apiKey - ElevenLabs API key
+ */
 export const generateElevenLabsSpeech = async (
-  text: string, 
-  geminiVoiceName: string, 
+  text: string,
+  voiceId: string | undefined,
+  geminiVoiceName: string,
   apiKey: string
 ): Promise<string> => {
-  const voiceId = getVoiceId(geminiVoiceName);
-  
-  console.log("--- [ElevenLabs] Generate Speech Prompt ---");
+  // Use provided voiceId, or fall back to mapping from Gemini voice name
+  const finalVoiceId = voiceId || getVoiceIdFromGeminiName(geminiVoiceName);
+
+  console.log("--- [ElevenLabs] Generate Speech ---");
   console.log(`Text: ${text}`);
-  console.log(`Voice ID: ${voiceId} (mapped from ${geminiVoiceName})`);
-  console.log("-------------------------------------------");
+  console.log(`Voice ID: ${finalVoiceId}`);
+  console.log("------------------------------------");
 
   // POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${finalVoiceId}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -86,7 +129,7 @@ export const generateElevenLabsSpeech = async (
     },
     body: JSON.stringify({
       text: text,
-      model_id: "eleven_multilingual_v2", // Updated to multilingual model to support Chinese
+      model_id: "eleven_multilingual_v2", // Multilingual model for Chinese support
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,

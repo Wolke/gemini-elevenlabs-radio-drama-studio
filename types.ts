@@ -4,21 +4,28 @@ export enum ItemType {
   SFX = 'sfx',
 }
 
+export type VoiceType = 'gemini' | 'elevenlabs';
+
+export interface ElevenLabsVoice {
+  voice_id: string;
+  name: string;
+  category?: string;
+  labels?: Record<string, string>;
+  preview_url?: string;
+}
+
 export interface CastMember {
   name: string;
-  voice: string; // One of the 30 Gemini voices
+  voice: string; // Gemini voice name OR display name
+  voiceType: VoiceType; // Source of the voice
+  elevenLabsVoiceId?: string; // ElevenLabs Voice ID (when voiceType is 'elevenlabs')
   description?: string;
-  visualDescription?: string; // Physical appearance for image gen
-  imageUrl?: string; // Base64 character portrait
-  isGeneratingVisual?: boolean; // UI loading state
 }
 
 export interface SceneDefinition {
   id: string;
   name: string;
   visualDescription: string;
-  imageUrl?: string;
-  isGeneratingVisual?: boolean;
 }
 
 export interface ScriptItem {
@@ -36,10 +43,6 @@ export interface ScriptItem {
   isLoadingAudio?: boolean;
   generationError?: string; // Capture API errors here
 
-  // Image state
-  imageUrl?: string; // Base64 scene image
-  isGeneratingVisual?: boolean;
-
   // YouTube SFX state
   youtubeId?: string;
   youtubeStartTime?: number; // seconds
@@ -51,12 +54,10 @@ export interface CharacterVoice {
   voiceName: string;
 }
 
-export type AspectRatio = '16:9' | '9:16';
-
 export interface DramaState {
   storyText: string;
   cast: CastMember[];
-  scenes: SceneDefinition[]; // New: List of locations
+  scenes: SceneDefinition[];
   items: ScriptItem[];
   isGeneratingScript: boolean;
   isPlaying: boolean;
@@ -65,10 +66,11 @@ export interface DramaState {
   // Configuration
   enableSfx: boolean;
   includeNarrator: boolean;
-  enableImages: boolean;
-  imageStyle: string;
-  aspectRatio: AspectRatio;
   geminiApiKey: string;
   elevenLabsApiKey: string;
   useElevenLabsForSpeech: boolean;
+
+  // ElevenLabs voices cache
+  elevenLabsVoices: ElevenLabsVoice[];
+  isLoadingVoices: boolean;
 }

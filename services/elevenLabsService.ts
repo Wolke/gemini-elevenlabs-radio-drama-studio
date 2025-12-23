@@ -117,7 +117,8 @@ export const generateElevenLabsSpeech = async (
   // Use provided voiceId, or fall back to mapping from Gemini voice name
   const finalVoiceId = voiceId || getVoiceIdFromGeminiName(geminiVoiceName);
 
-  // Prepend Audio Tag for accent/style control if voicePrompt is provided
+  // For v3 model: Prepend Audio Tag for accent/style control
+  // Note: Audio Tags only work with eleven_v3 model, NOT with multilingual_v2
   const finalText = voicePrompt
     ? `[${voicePrompt}] ${text}`
     : text;
@@ -136,9 +137,9 @@ export const generateElevenLabsSpeech = async (
     },
     body: JSON.stringify({
       text: finalText,
-      model_id: "eleven_multilingual_v2", // Multilingual model for Chinese support
+      model_id: "eleven_v3", // v3 model supports Audio Tags for accent/style control
       voice_settings: {
-        stability: 0.5,
+        stability: 0.0, // Creative mode - best for Audio Tags responsiveness
         similarity_boost: 0.75,
       }
     }),

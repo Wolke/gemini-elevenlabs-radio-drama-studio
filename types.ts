@@ -37,17 +37,12 @@ export interface ScriptItem {
   expression?: string; // e.g., "excited", "whispering"
   location?: string; // Reference to SceneDefinition.name
   sfxDescription?: string;
-  sfxSearchQuery?: string;
 
   // Audio state
   audioBuffer?: AudioBuffer | null;
   isLoadingAudio?: boolean;
   generationError?: string; // Capture API errors here
 
-  // YouTube SFX state
-  youtubeId?: string;
-  youtubeStartTime?: number; // seconds
-  youtubeDuration?: number; // seconds
 }
 
 export interface CharacterVoice {

@@ -42,7 +42,6 @@ export const generateScriptFromStory = async (
     sfxInstructions = `
        - For 'sfx' (Sound Effects):
          - 'sfxDescription': A short, descriptive prompt for a sound effect generator.
-         - 'sfxSearchQuery': A keyword string for finding this sound on YouTube.
     `;
   } else {
     sfxInstructions = `
@@ -156,7 +155,6 @@ ${elevenLabsVoices.slice(0, 20).map(v => `         - "${v.name}" (ID: ${v.voice_
                   text: { type: Type.STRING },
                   expression: { type: Type.STRING },
                   sfxDescription: { type: Type.STRING },
-                  sfxSearchQuery: { type: Type.STRING },
                 },
                 required: ["type", "location"],
               },
@@ -189,8 +187,6 @@ ${elevenLabsVoices.slice(0, 20).map(v => `         - "${v.name}" (ID: ${v.voice_
     const items = data.script.map((item: any) => ({
       ...item,
       id: crypto.randomUUID(),
-      youtubeDuration: 5,
-      youtubeStartTime: 0,
     }));
 
     return { cast, scenes, items };

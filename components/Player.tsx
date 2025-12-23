@@ -5,17 +5,16 @@ import { getAudioContext } from '../utils/audioUtils';
 interface PlayerProps {
   items: ScriptItem[];
   isPlaying: boolean;
+  enableSfx: boolean;
   onPlayStateChange: (isPlaying: boolean, currentId: string | null) => void;
 }
 
-export const Player: React.FC<PlayerProps> = ({ items, isPlaying, onPlayStateChange }) => {
+export const Player: React.FC<PlayerProps> = ({ items, isPlaying, enableSfx, onPlayStateChange }) => {
   const [currentIdx, setCurrentIdx] = useState<number>(-1);
-  const [youtubePlayer, setYoutubePlayer] = useState<any>(null);
-  
+
   // Refs to manage active playback state
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const timeoutRef = useRef<number | null>(null);
-  const youtubeContainerRef = useRef<HTMLDivElement>(null);
   const isPlayingRef = useRef(isPlaying);
 
   // Sync ref
@@ -36,10 +35,6 @@ export const Player: React.FC<PlayerProps> = ({ items, isPlaying, onPlayStateCha
         activeSourceRef.current.stop();
       } catch (e) { /* ignore */ }
       activeSourceRef.current = null;
-    }
-    // Stop YouTube
-    if (youtubePlayer && typeof youtubePlayer.stopVideo === 'function') {
-      youtubePlayer.stopVideo();
     }
     // Clear timeouts
     if (timeoutRef.current) {
@@ -69,14 +64,20 @@ export const Player: React.FC<PlayerProps> = ({ items, isPlaying, onPlayStateCha
         playItem(index + 1);
       }
     } else if (item.type === ItemType.SFX) {
-      // Check for generated audio buffer FIRST, then YouTube, then timeout
+      // If SFX is disabled in settings, skip the SFX item entirely
+      if (!enableSfx) {
+        console.log(`Skipping SFX item ${index}: Sound Effects disabled in settings`);
+        playItem(index + 1);
+        return;
+      }
+
+      // Check for generated audio buffer, otherwise skip
       if (item.audioBuffer) {
         playAudioBuffer(item.audioBuffer, () => playItem(index + 1));
-      } else if (item.youtubeId) {
-        playYoutubeSfx(item.youtubeId, item.youtubeStartTime || 0, item.youtubeDuration || 5, () => playItem(index + 1));
       } else {
-        // Wait default duration if no ID or Audio
-        timeoutRef.current = window.setTimeout(() => playItem(index + 1), 2000);
+        // Skip SFX without audio - no more YouTube fallback
+        console.warn(`Skipping SFX item ${index}: No audio generated`);
+        playItem(index + 1);
       }
     }
   };
@@ -94,65 +95,9 @@ export const Player: React.FC<PlayerProps> = ({ items, isPlaying, onPlayStateCha
     source.start();
   };
 
-  const playYoutubeSfx = (videoId: string, start: number, duration: number, onEnded: () => void) => {
-    // We assume youtubePlayer is initialized via the global API loaded in App or here.
-    // Since we need to dynamically load/play specific videos, we might destroy/recreate or just loadVideoById
-    
-    // For simplicity in this demo, we assume the iframe exists and we use the player API
-    if (!youtubePlayer) {
-      // If player not ready, skip after short delay
-      console.warn("YouTube Player not ready");
-      timeoutRef.current = window.setTimeout(onEnded, 2000);
-      return;
-    }
-
-    youtubePlayer.loadVideoById({
-      videoId: videoId,
-      startSeconds: start,
-      endSeconds: start + duration
-    });
-    youtubePlayer.playVideo();
-
-    // The YouTube API doesn't always strictly respect endSeconds for firing an event in all embed modes,
-    // so we set a safety timeout to move next.
-    timeoutRef.current = window.setTimeout(() => {
-        youtubePlayer.stopVideo();
-        onEnded();
-    }, duration * 1000 + 500); // 500ms buffer
-  };
-
-  // Initialize YouTube API
-  useEffect(() => {
-    // Load IFrame API
-    const tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    const firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-
-    (window as any).onYouTubeIframeAPIReady = () => {
-      const player = new (window as any).YT.Player('youtube-hidden-player', {
-        height: '0',
-        width: '0',
-        playerVars: {
-          'playsinline': 1,
-          'controls': 0,
-        },
-        events: {
-          'onReady': (event: any) => {
-             setYoutubePlayer(event.target);
-          }
-        }
-      });
-    };
-    
-    return () => {
-        // Cleanup if necessary
-    }
-  }, []);
-
   return (
     <div className="hidden">
-      <div id="youtube-hidden-player" ref={youtubeContainerRef}></div>
+      {/* No longer need hidden YouTube player */}
     </div>
   );
 };

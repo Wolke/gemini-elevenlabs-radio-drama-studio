@@ -37,20 +37,6 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
 
   const currentVoice = assignedVoice || 'Puck';
 
-  const handleYoutubeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value;
-    try {
-      const url = new URL(val);
-      const searchParams = new URLSearchParams(url.search);
-      if (searchParams.has('v')) {
-        val = searchParams.get('v') || val;
-      } else if (url.hostname === 'youtu.be') {
-        val = url.pathname.slice(1);
-      }
-    } catch (err) { }
-    onUpdate(item.id, { youtubeId: val });
-  };
-
   // Voice badge color based on type
   const voiceBadgeClass = voiceType === 'elevenlabs'
     ? 'text-blue-400 bg-blue-500/10 border-blue-500/30'
@@ -58,8 +44,8 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
 
   return (
     <div className={`relative flex flex-col gap-3 p-4 rounded-xl border transition-all duration-300 ${isPlaying
-        ? 'bg-indigo-900/30 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]'
-        : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
+      ? 'bg-indigo-900/30 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]'
+      : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
       }`}>
 
       {/* Header / Type Indicator */}
@@ -152,22 +138,6 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
                   className="w-full bg-transparent text-xs text-amber-200 placeholder:text-zinc-700 focus:outline-none"
                 />
               </div>
-
-              {!elevenLabsApiKey && (
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    placeholder="YouTube ID"
-                    value={item.youtubeId || ''}
-                    onChange={handleYoutubeChange}
-                    className="bg-zinc-950/50 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
-                  />
-                  <div className="flex gap-1">
-                    <input type="number" className="w-16 bg-zinc-950/50 border border-zinc-700 rounded px-1 py-1 text-xs" value={item.youtubeStartTime} onChange={(e) => onUpdate(item.id, { youtubeStartTime: Number(e.target.value) })} placeholder="Start" />
-                    <input type="number" className="w-16 bg-zinc-950/50 border border-zinc-700 rounded px-1 py-1 text-xs" value={item.youtubeDuration} onChange={(e) => onUpdate(item.id, { youtubeDuration: Number(e.target.value) })} placeholder="Dur" />
-                  </div>
-                </div>
-              )}
             </>
           )}
 
@@ -188,8 +158,8 @@ export const ScriptItemCard: React.FC<ScriptItemCardProps> = ({
                 onClick={() => onGenerateAudio(item.id, item.text || '', currentVoice, item.expression || '')}
                 disabled={item.isLoadingAudio || !item.text}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${item.audioBuffer
-                    ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
-                    : 'bg-zinc-100 text-zinc-900 hover:bg-white'
+                  ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                  : 'bg-zinc-100 text-zinc-900 hover:bg-white'
                   }`}
               >
                 {item.isLoadingAudio ? <Loader2 size={14} className="animate-spin" /> : (item.audioBuffer ? <RotateCw size={14} /> : <Volume2 size={14} />)}

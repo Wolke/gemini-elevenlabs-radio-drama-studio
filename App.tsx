@@ -103,9 +103,11 @@ export default function App() {
 
     try {
       // Pass ElevenLabs voices to AI so it can pick suitable ones for each character
+      // Only enable SFX if the setting is on AND we have an ElevenLabs API key to generate them
+      const shouldIncludeSfx = state.enableSfx && !!state.elevenLabsApiKey;
       const { cast, scenes, items } = await generateScriptFromStory(
         state.storyText,
-        state.enableSfx,
+        shouldIncludeSfx,
         state.includeNarrator,
         state.elevenLabsVoices,
         state.geminiApiKey
@@ -219,8 +221,7 @@ export default function App() {
       handleUpdateItem(id, {
         audioBuffer: buffer,
         isLoadingAudio: false,
-        generationError: undefined,
-        youtubeId: undefined
+        generationError: undefined
       });
     } catch (e: any) {
       console.error(e);
@@ -783,6 +784,7 @@ export default function App() {
       <Player
         items={state.items}
         isPlaying={state.isPlaying}
+        enableSfx={state.enableSfx}
         onPlayStateChange={(playing, id) => setState(prev => ({ ...prev, isPlaying: playing, currentPlayingId: id }))}
       />
 

@@ -18,3 +18,11 @@ View your app in AI Studio: https://ai.studio/apps/drive/1DQKsqDQUpAmQ77bTyUw-5x
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Built with
+
+- [Google Gemini API](https://ai.google.dev/) - AI script generation & text-to-speech
+- [ElevenLabs API](https://elevenlabs.io/) - High-quality voice synthesis & sound effects
+- [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) - Frontend framework
+- [Vite](https://vitejs.dev/) - Build tool
+- [Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API) - Audio processing & playback

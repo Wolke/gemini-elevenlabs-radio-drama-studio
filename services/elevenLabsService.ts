@@ -104,19 +104,26 @@ export const generateElevenLabsSfx = async (
  * @param text - Text to speak
  * @param voiceId - Direct ElevenLabs voice ID (when user selected specific voice)
  * @param geminiVoiceName - Fallback Gemini voice name (for mapping when no specific ID)
+ * @param voicePrompt - Optional accent/style prompt (will be converted to Audio Tag)
  * @param apiKey - ElevenLabs API key
  */
 export const generateElevenLabsSpeech = async (
   text: string,
   voiceId: string | undefined,
   geminiVoiceName: string,
+  voicePrompt: string | undefined,
   apiKey: string
 ): Promise<string> => {
   // Use provided voiceId, or fall back to mapping from Gemini voice name
   const finalVoiceId = voiceId || getVoiceIdFromGeminiName(geminiVoiceName);
 
+  // Prepend Audio Tag for accent/style control if voicePrompt is provided
+  const finalText = voicePrompt
+    ? `[${voicePrompt}] ${text}`
+    : text;
+
   console.log("--- [ElevenLabs] Generate Speech ---");
-  console.log(`Text: ${text}`);
+  console.log(`Text: ${finalText}`);
   console.log(`Voice ID: ${finalVoiceId}`);
   console.log("------------------------------------");
 
@@ -128,7 +135,7 @@ export const generateElevenLabsSpeech = async (
       'xi-api-key': apiKey,
     },
     body: JSON.stringify({
-      text: text,
+      text: finalText,
       model_id: "eleven_multilingual_v2", // Multilingual model for Chinese support
       voice_settings: {
         stability: 0.5,

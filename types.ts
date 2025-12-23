@@ -20,6 +20,7 @@ export interface CastMember {
   voiceType: VoiceType; // Source of the voice
   elevenLabsVoiceId?: string; // ElevenLabs Voice ID (when voiceType is 'elevenlabs')
   description?: string;
+  voicePrompt?: string; // Accent/style prompt for TTS, e.g. "Native Taiwanese Mandarin, cheerful"
 }
 
 export interface SceneDefinition {

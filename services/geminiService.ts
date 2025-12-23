@@ -76,6 +76,11 @@ export const generateScriptFromStory = async (
     1. **Cast**: Identify all characters. 
        - Assign a voice from the Gemini voice list.
        - Provide a brief 'description' of the character's role.
+       - Provide a 'voicePrompt' (ENGLISH): A TTS prompt describing the character's accent, speech style, and tone. Examples:
+         - "Native Beijing Mandarin speaker, formal and authoritative"
+         - "Native Taiwanese Mandarin speaker, soft and friendly"
+         - "Hong Kong Cantonese accent speaking Mandarin, businesslike"
+         - "American English speaker, energetic and youthful"
        ${narratorInstructions}
 
     2. **Scenes**: Identify the key locations/environments in the story.
@@ -117,8 +122,9 @@ export const generateScriptFromStory = async (
                   name: { type: Type.STRING },
                   voice: { type: Type.STRING, enum: ALL_VOICES },
                   description: { type: Type.STRING },
+                  voicePrompt: { type: Type.STRING, description: "TTS accent/style prompt in English, e.g. 'Native Taiwanese Mandarin speaker, cheerful'" },
                 },
-                required: ["name", "voice"]
+                required: ["name", "voice", "voicePrompt"]
               }
             },
             scenes: {
@@ -188,9 +194,21 @@ export const generateScriptFromStory = async (
   }
 };
 
-export const generateSpeech = async (text: string, voiceName: string = 'Puck', expression: string = '', apiKey?: string): Promise<string> => {
+export const generateSpeech = async (
+  text: string,
+  voiceName: string = 'Puck',
+  voicePrompt: string = '',
+  expression: string = '',
+  apiKey?: string
+): Promise<string> => {
   const ai = getAI(apiKey);
-  const textPrompt = expression ? `Say ${expression}: ${text}` : text;
+
+  // Build prompt with Director's Notes for accent/style control
+  let textPrompt = text;
+  if (voicePrompt || expression) {
+    const style = [voicePrompt, expression].filter(Boolean).join(', ');
+    textPrompt = `### DIRECTOR'S NOTES\nStyle: ${style}\n\n### TRANSCRIPT\n${text}`;
+  }
 
   console.log("--- [Gemini] Generate Speech Prompt ---");
   console.log(`Voice: ${voiceName}`);

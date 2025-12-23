@@ -70,7 +70,24 @@ export default function App() {
 
     try {
       const { cast, scenes, items } = await generateScriptFromStory(state.storyText, state.enableSfx, state.includeNarrator, state.geminiApiKey);
-      setState(prev => ({ ...prev, cast, scenes, items, isGeneratingScript: false }));
+
+      // If ElevenLabs voices are loaded, prioritize them for cast members
+      let finalCast = cast;
+      if (state.elevenLabsVoices.length > 0) {
+        finalCast = cast.map((member, idx) => {
+          // Pick a voice from the available ElevenLabs voices (round-robin or random)
+          const voiceIdx = idx % state.elevenLabsVoices.length;
+          const elVoice = state.elevenLabsVoices[voiceIdx];
+          return {
+            ...member,
+            voiceType: 'elevenlabs' as const,
+            elevenLabsVoiceId: elVoice.voice_id,
+            voice: elVoice.name, // Display name
+          };
+        });
+      }
+
+      setState(prev => ({ ...prev, cast: finalCast, scenes, items, isGeneratingScript: false }));
       setIsConfigExpanded(false);
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
@@ -120,16 +137,16 @@ export default function App() {
       const castMember = item?.character ? state.cast.find(c => c.name === item.character) : undefined;
 
       if (castMember?.voiceType === 'elevenlabs' && state.elevenLabsApiKey) {
-        // Use ElevenLabs with specific voice ID
-        const base64 = await generateElevenLabsSpeech(text, castMember.elevenLabsVoiceId, voice, state.elevenLabsApiKey);
+        // Use ElevenLabs with specific voice ID + voicePrompt
+        const base64 = await generateElevenLabsSpeech(text, castMember.elevenLabsVoiceId, voice, castMember.voicePrompt, state.elevenLabsApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else if (state.useElevenLabsForSpeech && state.elevenLabsApiKey) {
-        // Use ElevenLabs with mapped Gemini voice
-        const base64 = await generateElevenLabsSpeech(text, undefined, voice, state.elevenLabsApiKey);
+        // Use ElevenLabs with mapped Gemini voice + voicePrompt
+        const base64 = await generateElevenLabsSpeech(text, undefined, voice, castMember?.voicePrompt, state.elevenLabsApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else {
-        // Use Gemini TTS
-        const base64 = await generateSpeech(text, voice, expression, state.geminiApiKey);
+        // Use Gemini TTS with voicePrompt
+        const base64 = await generateSpeech(text, voice, castMember?.voicePrompt || '', expression, state.geminiApiKey);
         buffer = await decodeRawPCM(base64, ctx);
       }
 
@@ -554,6 +571,17 @@ export default function App() {
                           {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
                         </select>
                       )}
+                    </div>
+
+                    {/* Voice Prompt Editor */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-500 font-semibold uppercase">Voice Prompt (Accent/Style)</label>
+                      <textarea
+                        value={member.voicePrompt || ''}
+                        onChange={(e) => handleUpdateCast(member.name, { voicePrompt: e.target.value })}
+                        placeholder="e.g. Native Taiwanese Mandarin, warm and friendly"
+                        className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 resize-none h-12"
+                      />
                     </div>
                   </div>
                 );

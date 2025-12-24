@@ -1,6 +1,15 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { ItemType, ScriptItem, CastMember, SceneDefinition, ElevenLabsVoice } from "../types";
+import {
+  getSfxInstructions,
+  getNarratorInstructions,
+  getLanguageInstructions,
+  getScenesInstructions,
+  buildCastInstructions,
+  buildScriptInstructionsGemini,
+  getSystemPromptIntro,
+} from "./promptTemplates";
 
 // Helper to get or create Gemini client
 // Priority: provided apiKey > environment variable
@@ -37,70 +46,21 @@ export const generateScriptFromStory = async (
   if (!story.trim()) return { cast: [], scenes: [], items: [] };
   const ai = getAI(apiKey);
 
-  let sfxInstructions = "";
-  if (includeSfx) {
-    sfxInstructions = `
-       - For 'sfx' (Sound Effects):
-         - 'sfxDescription': A short, descriptive prompt for a sound effect generator.
-    `;
-  } else {
-    sfxInstructions = `
-       - **IMPORTANT**: DO NOT generate any items with type 'sfx'. The user has disabled sound effects.
-    `;
-  }
-
-  let narratorInstructions = "";
-  if (includeNarrator) {
-    narratorInstructions = `
-       - **Narrator**: You MUST include a character named 'Narrator' (or '旁白' if the story is in Chinese) in the cast and script. 
-         - Use the Narrator to describe the setting, actions, transitions, and atmosphere that cannot be conveyed by dialogue alone.
-         - Ensure the Narrator appears frequently to guide the listener.
-    `;
-  } else {
-    narratorInstructions = `
-       - **Narrator**: DO NOT include a Narrator or System character. 
-         - The story must be conveyed ENTIRELY through character dialogue${includeSfx ? ' and sound effects' : ''}.
-         - Adapt the dialogue so characters describe actions if necessary.
-    `;
-  }
+  const sfxInstructions = getSfxInstructions(includeSfx);
+  const narratorInstructions = getNarratorInstructions(includeNarrator, includeSfx);
 
   const prompt = `
-    You are an expert radio drama scriptwriter and director. 
+    ${getSystemPromptIntro()}
     Convert the following story into a detailed radio drama script with a cast list, a list of scenes (locations), and a sequence of cues.
     
-    **LANGUAGE INSTRUCTION**: 
-    - The 'text' (dialogue) field MUST be in the SAME LANGUAGE as the input story. 
-    - The 'expression' and 'visualDescription' (for scenes) fields MUST ALWAYS be in ENGLISH.
+    ${getLanguageInstructions()}
 
     **INSTRUCTIONS**:
-    1. **Cast**: Identify all characters. 
-       - Assign a voice from the Gemini voice list.
-       - Provide a brief 'description' of the character's role.
-       - Provide a 'voicePrompt' (ENGLISH): A TTS prompt describing the character's accent, speech style, and tone. Examples:
-         - "Native Beijing Mandarin speaker, formal and authoritative"
-         - "Native Taiwanese Mandarin speaker, soft and friendly"
-         - "Hong Kong Cantonese accent speaking Mandarin, businesslike"
-         - "American English speaker, energetic and youthful"
-       ${elevenLabsVoices.length > 0 ? `
-       - **IMPORTANT**: You have access to the following ElevenLabs voices. Pick the most suitable voice for each character based on the voice characteristics:
-${elevenLabsVoices.slice(0, 20).map(v => `         - "${v.name}" (ID: ${v.voice_id})${v.labels ? ` - ${Object.entries(v.labels).map(([k, val]) => `${k}: ${val}`).join(', ')}` : ''}`).join('\n')}
-       - Set 'elevenLabsVoiceId' to the voice ID that best matches the character.
-       ` : ''}
-       ${narratorInstructions}
+    ${buildCastInstructions(ALL_VOICES.join(', '), elevenLabsVoices, narratorInstructions)}
 
-    2. **Scenes**: Identify the key locations/environments in the story.
-       - Provide a 'name' (e.g., "Living Room", "Forest at Night").
-       - Provide a 'visualDescription' (ENGLISH): Detailed atmospheric description.
+    ${getScenesInstructions()}
 
-    3. **Script**: A list of cues.
-       - 'location': The name of the scene where this cue takes place (MUST match a name from the Scenes list).
-       - For 'speech':
-         - 'character': Name from the cast list.
-         - 'text': The dialogue (IN THE STORY'S LANGUAGE).
-         - 'expression': A direction for HOW it should be spoken (IN ENGLISH).
-       ${sfxInstructions}
-
-    Return a JSON object with keys "cast", "scenes", and "script".
+    ${buildScriptInstructionsGemini(sfxInstructions)}
 
     Story:
     "${story}"

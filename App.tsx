@@ -39,7 +39,7 @@ export default function App() {
       isGeneratingScript: false,
       isPlaying: false,
       currentPlayingId: null,
-      enableSfx: true,
+      enableSfx: false,
       includeNarrator: true,
       geminiApiKey: savedGeminiKey,
       elevenLabsApiKey: savedElevenLabsKey,

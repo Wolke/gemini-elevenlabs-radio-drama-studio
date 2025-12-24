@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType } from './types';
+import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType, LlmProvider, TtsProvider } from './types';
 import { generateScriptFromStory, generateSpeech } from './services/geminiService';
+import { generateScriptFromStoryOpenAI, generateOpenAISpeech, OPENAI_VOICES } from './services/openaiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech, fetchElevenLabsVoices } from './services/elevenLabsService';
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
@@ -27,6 +28,9 @@ export default function App() {
     // Load API keys from localStorage if saved
     const savedGeminiKey = localStorage.getItem('geminiApiKey') || '';
     const savedElevenLabsKey = localStorage.getItem('elevenLabsApiKey') || '';
+    const savedOpenaiKey = localStorage.getItem('openaiApiKey') || '';
+    const savedLlmProvider = (localStorage.getItem('llmProvider') as LlmProvider) || 'gemini';
+    const savedTtsProvider = (localStorage.getItem('ttsProvider') as TtsProvider) || 'gemini';
     return {
       storyText: '',
       cast: [],
@@ -42,6 +46,10 @@ export default function App() {
       useElevenLabsForSpeech: true,
       elevenLabsVoices: [],
       isLoadingVoices: false,
+      // OpenAI settings
+      openaiApiKey: savedOpenaiKey,
+      llmProvider: savedLlmProvider,
+      ttsProvider: savedTtsProvider,
     };
   });
 
@@ -50,6 +58,9 @@ export default function App() {
   });
   const [saveElevenLabsKey, setSaveElevenLabsKey] = useState(() => {
     return localStorage.getItem('saveElevenLabsKey') === 'true';
+  });
+  const [saveOpenaiKey, setSaveOpenaiKey] = useState(() => {
+    return localStorage.getItem('saveOpenaiKey') === 'true';
   });
 
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
@@ -81,6 +92,23 @@ export default function App() {
     }
   }, [saveElevenLabsKey, state.elevenLabsApiKey]);
 
+  // Save OpenAI API key
+  React.useEffect(() => {
+    if (saveOpenaiKey && state.openaiApiKey) {
+      localStorage.setItem('saveOpenaiKey', 'true');
+      localStorage.setItem('openaiApiKey', state.openaiApiKey);
+    } else {
+      localStorage.removeItem('saveOpenaiKey');
+      localStorage.removeItem('openaiApiKey');
+    }
+  }, [saveOpenaiKey, state.openaiApiKey]);
+
+  // Save provider selections
+  React.useEffect(() => {
+    localStorage.setItem('llmProvider', state.llmProvider);
+    localStorage.setItem('ttsProvider', state.ttsProvider);
+  }, [state.llmProvider, state.ttsProvider]);
+
   // Fetch ElevenLabs voices when API key changes
   const handleFetchVoices = async () => {
     if (!state.elevenLabsApiKey) return;
@@ -98,6 +126,13 @@ export default function App() {
   const handleGenerateScript = async () => {
     if (!state.storyText.trim()) return;
 
+    // Check required API key based on provider
+    const requiredApiKey = state.llmProvider === 'openai' ? state.openaiApiKey : state.geminiApiKey;
+    if (!requiredApiKey) {
+      setError(`Please enter ${state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API key first.`);
+      return;
+    }
+
     setError(null);
     setState(prev => ({ ...prev, isGeneratingScript: true }));
 
@@ -105,18 +140,37 @@ export default function App() {
       // Pass ElevenLabs voices to AI so it can pick suitable ones for each character
       // Only enable SFX if the setting is on AND we have an ElevenLabs API key to generate them
       const shouldIncludeSfx = state.enableSfx && !!state.elevenLabsApiKey;
-      const { cast, scenes, items } = await generateScriptFromStory(
-        state.storyText,
-        shouldIncludeSfx,
-        state.includeNarrator,
-        state.elevenLabsVoices,
-        state.geminiApiKey
-      );
 
-      // Set voiceType based on whether AI assigned an ElevenLabs voice
+      let cast, scenes, items;
+
+      if (state.llmProvider === 'openai') {
+        const result = await generateScriptFromStoryOpenAI(
+          state.storyText,
+          shouldIncludeSfx,
+          state.includeNarrator,
+          state.elevenLabsVoices,
+          state.openaiApiKey
+        );
+        cast = result.cast;
+        scenes = result.scenes;
+        items = result.items;
+      } else {
+        const result = await generateScriptFromStory(
+          state.storyText,
+          shouldIncludeSfx,
+          state.includeNarrator,
+          state.elevenLabsVoices,
+          state.geminiApiKey
+        );
+        cast = result.cast;
+        scenes = result.scenes;
+        items = result.items;
+      }
+
+      // Set voiceType based on ttsProvider and whether AI assigned an ElevenLabs voice
       const finalCast = cast.map(member => {
-        if (member.elevenLabsVoiceId && state.elevenLabsVoices.length > 0) {
-          // AI picked a voice - verify it exists and get the name
+        // If ElevenLabs is TTS provider and AI picked a valid ElevenLabs voice
+        if (state.ttsProvider === 'elevenlabs' && member.elevenLabsVoiceId && state.elevenLabsVoices.length > 0) {
           const elVoice = state.elevenLabsVoices.find(v => v.voice_id === member.elevenLabsVoiceId);
           if (elVoice) {
             return {
@@ -125,6 +179,12 @@ export default function App() {
               voice: elVoice.name,
             };
           }
+        }
+        // Use the selected TTS provider's voice type
+        if (state.ttsProvider === 'openai') {
+          // Default to a suitable OpenAI voice
+          const openaiVoice = OPENAI_VOICES.includes(member.voice as any) ? member.voice : 'alloy';
+          return { ...member, voiceType: 'openai' as const, voice: openaiVoice };
         }
         // Default to Gemini voice
         return { ...member, voiceType: 'gemini' as const };
@@ -179,9 +239,17 @@ export default function App() {
       const item = state.items.find(i => i.id === id);
       const castMember = item?.character ? state.cast.find(c => c.name === item.character) : undefined;
 
-      if (castMember?.voiceType === 'elevenlabs' && state.elevenLabsApiKey) {
+      if (castMember?.voiceType === 'openai' && state.openaiApiKey) {
+        // Use OpenAI TTS
+        const base64 = await generateOpenAISpeech(text, voice, castMember.voicePrompt || '', state.openaiApiKey);
+        buffer = await decodeAudioFile(base64, ctx);
+      } else if (castMember?.voiceType === 'elevenlabs' && state.elevenLabsApiKey) {
         // Use ElevenLabs with specific voice ID + voicePrompt
         const base64 = await generateElevenLabsSpeech(text, castMember.elevenLabsVoiceId, voice, castMember.voicePrompt, state.elevenLabsApiKey);
+        buffer = await decodeAudioFile(base64, ctx);
+      } else if (state.ttsProvider === 'openai' && state.openaiApiKey) {
+        // Fallback to OpenAI TTS based on provider setting
+        const base64 = await generateOpenAISpeech(text, voice, castMember?.voicePrompt || '', state.openaiApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else if (state.useElevenLabsForSpeech && state.elevenLabsApiKey) {
         // Use ElevenLabs with mapped Gemini voice + voicePrompt
@@ -419,13 +487,13 @@ export default function App() {
               />
               <button
                 onClick={handleGenerateScript}
-                disabled={state.isGeneratingScript || !state.storyText.trim() || !state.geminiApiKey}
+                disabled={state.isGeneratingScript || !state.storyText.trim() || (state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey)}
                 className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
-                Generate Script & Cast
+                Generate Script & Cast ({state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'})
               </button>
-              {!state.geminiApiKey && <p className="text-amber-400 text-xs text-center">⚠ Enter Gemini API Key first</p>}
+              {(state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey) && <p className="text-amber-400 text-xs text-center">⚠ Enter {state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API Key first</p>}
               {error && <p className="text-red-400 text-xs text-center">{error}</p>}
             </div>
 
@@ -475,6 +543,67 @@ export default function App() {
                   {state.elevenLabsVoices.length > 0 && (
                     <p className="text-xs text-blue-400">✓ {state.elevenLabsVoices.length} voices loaded</p>
                   )}
+                </div>
+
+                {/* LLM Provider Selection */}
+                <div className="p-3 bg-purple-500/5 rounded-lg border border-purple-500/20 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
+                      <Wand2 size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-purple-300">Script Generation (LLM)</p>
+                      <p className="text-xs text-zinc-500">Choose AI for script generation</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, llmProvider: 'gemini' }))}
+                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Gemini
+                    </button>
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, llmProvider: 'openai' }))}
+                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      OpenAI
+                    </button>
+                  </div>
+                </div>
+
+                {/* TTS Provider Selection */}
+                <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
+                      <Volume2 size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-amber-300">Voice Generation (TTS)</p>
+                      <p className="text-xs text-zinc-500">Choose AI for text-to-speech</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, ttsProvider: 'gemini' }))}
+                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Gemini
+                    </button>
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, ttsProvider: 'openai' }))}
+                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      OpenAI
+                    </button>
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, ttsProvider: 'elevenlabs' }))}
+                      disabled={state.elevenLabsVoices.length === 0}
+                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
+                    >
+                      ElevenLabs
+                    </button>
+                  </div>
                 </div>
 
                 {/* Use ElevenLabs for Speech Toggle */}
@@ -555,6 +684,37 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                {/* OpenAI API Key */}
+                <div className="p-3 bg-cyan-500/5 rounded-lg border border-cyan-500/20 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-md">
+                      <Key size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-cyan-300">OpenAI API Key</p>
+                      <p className="text-xs text-zinc-500">For GPT-4o script & TTS</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="Enter your OpenAI API Key..."
+                      value={state.openaiApiKey}
+                      onChange={(e) => setState(prev => ({ ...prev, openaiApiKey: e.target.value }))}
+                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                    {state.openaiApiKey && (
+                      <button
+                        onClick={() => setSaveOpenaiKey(!saveOpenaiKey)}
+                        className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveOpenaiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                        title={saveOpenaiKey ? 'Saved locally' : 'Click to save locally'}
+                      >
+                        <Save size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -597,6 +757,13 @@ export default function App() {
                           Gemini
                         </button>
                         <button
+                          onClick={() => handleUpdateCast(member.name, { voiceType: 'openai' })}
+                          disabled={!state.openaiApiKey}
+                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
+                        >
+                          OpenAI
+                        </button>
+                        <button
                           onClick={() => handleUpdateCast(member.name, { voiceType: 'elevenlabs' })}
                           disabled={state.elevenLabsVoices.length === 0}
                           className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
@@ -607,7 +774,36 @@ export default function App() {
 
                       {/* Voice Dropdown with Preview */}
                       <div className="flex gap-2">
-                        {member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
+                        {member.voiceType === 'openai' && state.openaiApiKey ? (
+                          <>
+                            <select
+                              value={member.voice}
+                              onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                              className="flex-1 bg-zinc-950 border border-cyan-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
+                            >
+                              {OPENAI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                            </select>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const base64 = await generateOpenAISpeech("Hello, this is a voice preview.", member.voice, '', state.openaiApiKey);
+                                  const ctx = getAudioContext();
+                                  const buffer = await decodeAudioFile(base64, ctx);
+                                  const source = ctx.createBufferSource();
+                                  source.buffer = buffer;
+                                  source.connect(ctx.destination);
+                                  source.start();
+                                } catch (e) {
+                                  console.error("Preview failed:", e);
+                                }
+                              }}
+                              className="px-2 py-1 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded text-xs flex items-center gap-1"
+                              title="Preview voice"
+                            >
+                              <Play size={12} fill="currentColor" />
+                            </button>
+                          </>
+                        ) : member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
                           <>
                             <select
                               value={member.elevenLabsVoiceId || ''}

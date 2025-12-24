@@ -4,7 +4,9 @@ export enum ItemType {
   SFX = 'sfx',
 }
 
-export type VoiceType = 'gemini' | 'elevenlabs';
+export type LlmProvider = 'gemini' | 'openai';
+export type TtsProvider = 'gemini' | 'openai' | 'elevenlabs';
+export type VoiceType = 'gemini' | 'openai' | 'elevenlabs';
 
 export interface ElevenLabsVoice {
   voice_id: string;
@@ -16,7 +18,7 @@ export interface ElevenLabsVoice {
 
 export interface CastMember {
   name: string;
-  voice: string; // Gemini voice name OR display name
+  voice: string; // Gemini/OpenAI voice name OR display name
   voiceType: VoiceType; // Source of the voice
   elevenLabsVoiceId?: string; // ElevenLabs Voice ID (when voiceType is 'elevenlabs')
   description?: string;
@@ -65,6 +67,11 @@ export interface DramaState {
   geminiApiKey: string;
   elevenLabsApiKey: string;
   useElevenLabsForSpeech: boolean;
+
+  // OpenAI Configuration
+  openaiApiKey: string;
+  llmProvider: LlmProvider;
+  ttsProvider: TtsProvider;
 
   // ElevenLabs voices cache
   elevenLabsVoices: ElevenLabsVoice[];

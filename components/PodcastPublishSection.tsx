@@ -223,6 +223,44 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
         }
     };
 
+    // Regenerate Cover Art
+    const [isRegeneratingCover, setIsRegeneratingCover] = useState(false);
+    const handleRegenerateCover = async () => {
+        if (!coverPrompt && !storyText) {
+            alert('需要故事內容或提示詞才能生成封面');
+            return;
+        }
+        if (!hasAnyImageKey) {
+            alert('需要設定 Gemini 或 OpenAI API Key');
+            return;
+        }
+
+        setIsRegeneratingCover(true);
+        try {
+            const prompt = coverPrompt || `Based on this story: "${storyText.slice(0, 500)}..."`;
+            let cover;
+
+            if (imageProvider === 'openai' && hasOpenaiKey) {
+                const rawCover = await generateOpenAICoverArt(prompt, openaiApiKey);
+                // Compress for iTunes compatibility (<500KB)
+                const { compressImageForPodcast } = await import('../services/podcastService');
+                cover = await compressImageForPodcast(rawCover);
+            } else if (hasGeminiKey) {
+                // Gemini already compresses in generatePodcastCoverArt
+                cover = await generatePodcastCoverArt(prompt, podcastTitle, geminiApiKey);
+            } else {
+                throw new Error('No valid API key for selected provider');
+            }
+
+            setCoverArtBase64(cover);
+        } catch (e: any) {
+            console.error('Cover regeneration error:', e);
+            alert('封面圖生成失敗: ' + e.message);
+        } finally {
+            setIsRegeneratingCover(false);
+        }
+    };
+
     // Regenerate MP3 only
     const [isRegeneratingMp3, setIsRegeneratingMp3] = useState(false);
     const handleRegenerateMp3 = async () => {
@@ -483,6 +521,14 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             {/* Regenerate Buttons - show when audio exists */}
             {hasAudio && (
                 <div className="flex gap-3">
+                    <button
+                        onClick={handleRegenerateCover}
+                        disabled={isRegeneratingCover || isGenerating}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg text-sm text-purple-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isRegeneratingCover ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        重新生成封面
+                    </button>
                     <button
                         onClick={handleRegenerateMp3}
                         disabled={isRegeneratingMp3 || isGenerating}

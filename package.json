@@ -10,8 +10,6 @@
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
-    "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2",
     "@google/genai": "^1.34.0",
     "@types/jszip": "^3.4.0",
     "jszip": "^3.10.1",

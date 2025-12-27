@@ -4,10 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Play } from 'lucide-react';
+import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film } from 'lucide-react';
 import { generatePodcastCoverArt, createPodcastZip, downloadBlob, PodcastMetadata, EpisodeMetadata } from '../services/podcastService';
 import { generateOpenAICoverArt } from '../services/openaiService';
-import { bufferToWav, bufferToMp3, createMp4Video, mergeAudioBuffers } from '../utils/audioUtils';
+import { bufferToWav, bufferToMp3, createWebmVideo, mergeAudioBuffers } from '../utils/audioUtils';
 import { GeneratedPodcastInfo, ImageProvider } from '../types';
 
 interface PodcastPublishSectionProps {
@@ -50,7 +50,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
 
     // Generated outputs
     const [mp3Blob, setMp3Blob] = useState<Blob | null>(null);
-    const [mp4Blob, setMp4Blob] = useState<Blob | null>(null);
+    const [webmBlob, setWebmBlob] = useState<Blob | null>(null);
     const [rssZipBlob, setRssZipBlob] = useState<Blob | null>(null);
 
     // Generation state
@@ -90,15 +90,14 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
 
         setIsGenerating(true);
         setMp3Blob(null);
-        setMp4Blob(null);
+        setWebmBlob(null);
         setRssZipBlob(null);
 
-        // Initialize steps
         const initialSteps: GenerationStep[] = [
             { id: 'audio', label: '生成音訊', status: allAudioGenerated ? 'done' : 'pending' },
             { id: 'cover', label: '生成封面圖', status: coverArtBase64 ? 'done' : 'pending' },
             { id: 'mp3', label: '合成 MP3', status: 'pending' },
-            { id: 'mp4', label: '合成 MP4 影片', status: 'pending' },
+            { id: 'webm', label: '合成 WebM 影片', status: 'pending' },
             { id: 'rss', label: '打包 RSS + MP3', status: 'pending' },
         ];
         setSteps(initialSteps);
@@ -158,19 +157,19 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                 updateStep('mp3', 'error', e.message);
             }
 
-            // Step 4: Create MP4 video (only if we have cover)
+            // Step 4: Create WebM video (only if we have cover)
             if (cover) {
-                updateStep('mp4', 'running');
+                updateStep('webm', 'running');
                 try {
-                    const mp4 = await createMp4Video(wavBlob, cover);
-                    setMp4Blob(mp4);
-                    updateStep('mp4', 'done');
+                    const webm = await createWebmVideo(wavBlob, cover, mergedBuffer.duration);
+                    setWebmBlob(webm);
+                    updateStep('webm', 'done');
                 } catch (e: any) {
-                    console.error('MP4 error:', e);
-                    updateStep('mp4', 'error', e.message);
+                    console.error('WebM error:', e);
+                    updateStep('webm', 'error', e.message);
                 }
             } else {
-                updateStep('mp4', 'error', '需要封面圖');
+                updateStep('webm', 'error', '需要封面圖');
             }
 
             // Step 5: Create RSS ZIP package
@@ -214,7 +213,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
 
     // Download handlers
     const handleDownloadMp3 = () => mp3Blob && downloadBlob(mp3Blob, `${episodeTitle || 'podcast'}.mp3`);
-    const handleDownloadMp4 = () => mp4Blob && downloadBlob(mp4Blob, `${episodeTitle || 'podcast'}.mp4`);
+    const handleDownloadWebm = () => webmBlob && downloadBlob(webmBlob, `${episodeTitle || 'podcast'}.webm`);
     const handleDownloadRss = () => rssZipBlob && downloadBlob(rssZipBlob, `${podcastTitle.replace(/\s+/g, '_')}_podcast.zip`);
     const handleDownloadCover = () => {
         if (coverArtBase64) {
@@ -412,7 +411,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             )}
 
             {/* Download Buttons */}
-            {(mp3Blob || mp4Blob || rssZipBlob || coverArtBase64) && (
+            {(mp3Blob || webmBlob || rssZipBlob || coverArtBase64) && (
                 <div className="bg-black/30 rounded-lg p-4">
                     <div className="text-sm font-semibold text-zinc-300 mb-3">下載檔案</div>
                     <div className="grid grid-cols-4 gap-3">
@@ -425,12 +424,12 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                             <span className="text-xs text-zinc-300">MP3 音訊</span>
                         </button>
                         <button
-                            onClick={handleDownloadMp4}
-                            disabled={!mp4Blob}
+                            onClick={handleDownloadWebm}
+                            disabled={!webmBlob}
                             className="flex flex-col items-center gap-2 p-3 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
-                            <Download size={20} className="text-red-400" />
-                            <span className="text-xs text-zinc-300">MP4 影片</span>
+                            <Film size={20} className="text-red-400" />
+                            <span className="text-xs text-zinc-300">WebM 影片</span>
                         </button>
                         <button
                             onClick={handleDownloadRss}

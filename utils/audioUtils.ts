@@ -214,60 +214,85 @@ export async function bufferToMp3(buffer: AudioBuffer): Promise<Blob> {
   }
 }
 
-
 /**
- * Creates an MP4 video with static image and audio using FFmpeg WASM
- * @param audioBlob - Audio file (WAV or MP3)
+ * Creates a WebM video with static image and audio using native browser APIs
+ * @param audioBlob - Audio file (WAV)
  * @param imageBase64 - Base64 encoded cover image (PNG/JPG)
- * @returns MP4 video blob
+ * @param duration - Duration in seconds
+ * @returns WebM video blob
  */
-export async function createMp4Video(
+export async function createWebmVideo(
   audioBlob: Blob,
-  imageBase64: string
+  imageBase64: string,
+  duration: number
 ): Promise<Blob> {
-  // Dynamic import FFmpeg
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-  const { fetchFile, toBlobURL } = await import('@ffmpeg/util');
+  // Create a canvas with the cover image
+  const canvas = document.createElement('canvas');
+  canvas.width = 1280;
+  canvas.height = 720;
+  const ctx = canvas.getContext('2d')!;
 
-  const ffmpeg = new FFmpeg();
-
-  // Load FFmpeg WASM
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-  await ffmpeg.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+  // Load and draw the image
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = reject;
+    img.src = `data:image/png;base64,${imageBase64}`;
   });
 
-  // Write audio file
-  const audioData = await fetchFile(audioBlob);
-  await ffmpeg.writeFile('audio.wav', audioData);
+  // Draw image centered and scaled to fit
+  const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+  const x = (canvas.width - img.width * scale) / 2;
+  const y = (canvas.height - img.height * scale) / 2;
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
 
-  // Write image file
-  const imageBytes = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0));
-  await ffmpeg.writeFile('cover.png', imageBytes);
+  // Create video stream from canvas
+  const stream = canvas.captureStream(1); // 1 fps is enough for static image
 
-  // Create MP4: loop image for duration of audio, add audio track
-  await ffmpeg.exec([
-    '-loop', '1',           // Loop the image
-    '-i', 'cover.png',      // Input image
-    '-i', 'audio.wav',      // Input audio
-    '-c:v', 'libx264',      // Video codec: H.264
-    '-tune', 'stillimage',  // Optimize for still image
-    '-c:a', 'aac',          // Audio codec: AAC
-    '-b:a', '192k',         // Audio bitrate
-    '-pix_fmt', 'yuv420p',  // Pixel format for compatibility
-    '-shortest',            // End when shortest input ends (audio)
-    '-movflags', '+faststart', // Optimize for web playback
-    'output.mp4'
+  // Create audio context and source
+  const audioContext = new AudioContext();
+  const audioBuffer = await audioContext.decodeAudioData(await audioBlob.arrayBuffer());
+  const source = audioContext.createBufferSource();
+  source.buffer = audioBuffer;
+
+  // Create MediaStreamDestination for audio
+  const dest = audioContext.createMediaStreamDestination();
+  source.connect(dest);
+
+  // Combine video and audio streams
+  const combinedStream = new MediaStream([
+    ...stream.getVideoTracks(),
+    ...dest.stream.getAudioTracks()
   ]);
 
-  // Read the output file
-  const data = await ffmpeg.readFile('output.mp4');
+  // Record the combined stream
+  const mediaRecorder = new MediaRecorder(combinedStream, {
+    mimeType: 'video/webm;codecs=vp9,opus'
+  });
 
-  // Convert to ArrayBuffer for Blob compatibility
-  const buffer = data instanceof Uint8Array
-    ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
-    : data;
+  const chunks: Blob[] = [];
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
 
-  return new Blob([buffer], { type: 'video/mp4' });
+  // Start recording
+  source.start();
+  mediaRecorder.start();
+
+  // Wait for duration + small buffer
+  await new Promise(r => setTimeout(r, duration * 1000 + 500));
+
+  // Stop recording
+  mediaRecorder.stop();
+  source.stop();
+  audioContext.close();
+
+  // Wait for data to be available
+  await new Promise<void>(resolve => {
+    mediaRecorder.onstop = () => resolve();
+  });
+
+  return new Blob(chunks, { type: 'video/webm' });
 }

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save } from 'lucide-react';
+import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save, RefreshCw } from 'lucide-react';
 import { generatePodcastCoverArt, createPodcastZip, downloadBlob, PodcastMetadata, EpisodeMetadata } from '../services/podcastService';
 import { generateOpenAICoverArt } from '../services/openaiService';
 import { bufferToWav, bufferToMp3, createWebmVideo, mergeAudioBuffers } from '../utils/audioUtils';
@@ -223,6 +223,57 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
         }
     };
 
+    // Regenerate MP3 only
+    const [isRegeneratingMp3, setIsRegeneratingMp3] = useState(false);
+    const handleRegenerateMp3 = async () => {
+        const buffers = items
+            .map(i => i.audioBuffer)
+            .filter((b): b is AudioBuffer => !!b);
+        if (buffers.length === 0) {
+            alert('沒有可用的音訊');
+            return;
+        }
+        setIsRegeneratingMp3(true);
+        try {
+            const mergedBuffer = await mergeAudioBuffers(buffers);
+            const mp3 = await bufferToMp3(mergedBuffer);
+            setMp3Blob(mp3);
+        } catch (e: any) {
+            console.error('MP3 regeneration error:', e);
+            alert('MP3 合成失敗: ' + e.message);
+        } finally {
+            setIsRegeneratingMp3(false);
+        }
+    };
+
+    // Regenerate WebM only
+    const [isRegeneratingWebm, setIsRegeneratingWebm] = useState(false);
+    const handleRegenerateWebm = async () => {
+        const buffers = items
+            .map(i => i.audioBuffer)
+            .filter((b): b is AudioBuffer => !!b);
+        if (buffers.length === 0) {
+            alert('沒有可用的音訊');
+            return;
+        }
+        if (!coverArtBase64) {
+            alert('需要封面圖才能生成影片');
+            return;
+        }
+        setIsRegeneratingWebm(true);
+        try {
+            const mergedBuffer = await mergeAudioBuffers(buffers);
+            const wavBlob = bufferToWav(mergedBuffer);
+            const webm = await createWebmVideo(wavBlob, coverArtBase64, mergedBuffer.duration);
+            setWebmBlob(webm);
+        } catch (e: any) {
+            console.error('WebM regeneration error:', e);
+            alert('WebM 合成失敗: ' + e.message);
+        } finally {
+            setIsRegeneratingWebm(false);
+        }
+    };
+
     // Download handlers
     const handleDownloadMp3 = () => mp3Blob && downloadBlob(mp3Blob, `${episodeTitle || 'podcast'}.mp3`);
     const handleDownloadWebm = () => webmBlob && downloadBlob(webmBlob, `${episodeTitle || 'podcast'}.webm`);
@@ -426,6 +477,28 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                             </div>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {/* Regenerate Buttons - show when audio exists */}
+            {hasAudio && (
+                <div className="flex gap-3">
+                    <button
+                        onClick={handleRegenerateMp3}
+                        disabled={isRegeneratingMp3 || isGenerating}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/30 rounded-lg text-sm text-orange-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isRegeneratingMp3 ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        重新合成 MP3
+                    </button>
+                    <button
+                        onClick={handleRegenerateWebm}
+                        disabled={isRegeneratingWebm || isGenerating || !coverArtBase64}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded-lg text-sm text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isRegeneratingWebm ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        重新合成 WebM
+                    </button>
                 </div>
             )}
 

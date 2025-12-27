@@ -137,7 +137,15 @@ export default function App() {
     }
 
     setError(null);
-    setState(prev => ({ ...prev, isGeneratingScript: true }));
+    setState(prev => ({
+      ...prev,
+      isGeneratingScript: true,
+      // Clear previous generation results and podcast info to reset state
+      cast: [],
+      scenes: [],
+      items: [],
+      podcastInfo: null
+    }));
 
     try {
       // Pass ElevenLabs voices to AI so it can pick suitable ones for each character
@@ -195,7 +203,16 @@ export default function App() {
         return { ...member, voiceType: 'gemini' as const };
       });
 
-      setState(prev => ({ ...prev, cast: finalCast, scenes, items, podcastInfo, isGeneratingScript: false }));
+      setState(prev => ({
+        ...prev,
+        cast: finalCast,
+        scenes,
+        items,
+        podcastInfo,
+        isGeneratingScript: false,
+        // Update timestamp to force PodcastPublishSection to reset
+        scriptGenerationTimestamp: Date.now()
+      }));
       setIsConfigExpanded(false);
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
@@ -494,525 +511,535 @@ export default function App() {
         </div>
       </header>
 
+      {/* Story Input Section */}
+      <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 mb-8">
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+            <FileText size={16} /> Story Input
+          </h3>
+          <textarea
+            value={state.storyText}
+            onChange={(e) => setState(prev => ({ ...prev, storyText: e.target.value }))}
+            placeholder="Paste your story or scene description here..."
+            className="w-full h-40 bg-black/40 border border-zinc-700 rounded-lg p-4 text-sm focus:outline-none focus:border-blue-500 resize-none"
+          />
+          <button
+            onClick={handleGenerateScript}
+            disabled={state.isGeneratingScript || !state.storyText.trim() || (state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey)}
+            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
+            Generate Script & Cast ({state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'})
+          </button>
+          {(state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey) && <p className="text-amber-400 text-xs text-center">⚠ Enter {state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API Key first</p>}
+          {error && <p className="text-red-400 text-xs text-center">{error}</p>}
+        </div>
+      </section>
+
       {/* Configuration Panel */}
       {isConfigExpanded && (
         <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 mb-8 animate-in fade-in slide-in-from-top-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="space-y-6">
+            <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+              <Settings2 size={16} /> Settings
+            </h3>
+
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                <FileText size={16} /> Story Input
-              </h3>
-              <textarea
-                value={state.storyText}
-                onChange={(e) => setState(prev => ({ ...prev, storyText: e.target.value }))}
-                placeholder="Paste your story or scene description here..."
-                className="w-full h-40 bg-black/40 border border-zinc-700 rounded-lg p-4 text-sm focus:outline-none focus:border-blue-500 resize-none"
-              />
-              <button
-                onClick={handleGenerateScript}
-                disabled={state.isGeneratingScript || !state.storyText.trim() || (state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey)}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
-                Generate Script & Cast ({state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'})
-              </button>
-              {(state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey) && <p className="text-amber-400 text-xs text-center">⚠ Enter {state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API Key first</p>}
-              {error && <p className="text-red-400 text-xs text-center">{error}</p>}
-            </div>
-
-            <div className="space-y-6">
-              <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                <Settings2 size={16} /> Settings
-              </h3>
-
-              <div className="space-y-4">
-                {/* ElevenLabs API Key - Primary */}
-                <div className="p-3 bg-blue-500/5 rounded-lg border border-blue-500/20 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
-                      <Key size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-blue-300">ElevenLabs API Key</p>
-                      <p className="text-xs text-zinc-500">Required for voice & SFX generation</p>
-                    </div>
+              {/* ElevenLabs API Key - Primary */}
+              <div className="p-3 bg-blue-500/5 rounded-lg border border-blue-500/20 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
+                    <Key size={18} />
                   </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      placeholder="Enter your ElevenLabs API Key..."
-                      value={state.elevenLabsApiKey}
-                      onChange={(e) => setState(prev => ({ ...prev, elevenLabsApiKey: e.target.value }))}
-                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-blue-500"
-                    />
-                    {state.elevenLabsApiKey && (
-                      <button
-                        onClick={() => setSaveElevenLabsKey(!saveElevenLabsKey)}
-                        className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveElevenLabsKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                        title={saveElevenLabsKey ? 'Saved locally' : 'Click to save locally'}
-                      >
-                        <Save size={12} />
-                      </button>
-                    )}
+                  <div>
+                    <p className="text-sm font-medium text-blue-300">ElevenLabs API Key</p>
+                    <p className="text-xs text-zinc-500">Required for voice & SFX generation</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Enter your ElevenLabs API Key..."
+                    value={state.elevenLabsApiKey}
+                    onChange={(e) => setState(prev => ({ ...prev, elevenLabsApiKey: e.target.value }))}
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-blue-500"
+                  />
+                  {state.elevenLabsApiKey && (
                     <button
-                      onClick={handleFetchVoices}
-                      disabled={!state.elevenLabsApiKey || state.isLoadingVoices}
-                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium disabled:opacity-50 flex items-center gap-1"
+                      onClick={() => setSaveElevenLabsKey(!saveElevenLabsKey)}
+                      className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveElevenLabsKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                      title={saveElevenLabsKey ? 'Saved locally' : 'Click to save locally'}
                     >
-                      {state.isLoadingVoices ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                      Fetch Voices
+                      <Save size={12} />
                     </button>
+                  )}
+                  <button
+                    onClick={handleFetchVoices}
+                    disabled={!state.elevenLabsApiKey || state.isLoadingVoices}
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium disabled:opacity-50 flex items-center gap-1"
+                  >
+                    {state.isLoadingVoices ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    Fetch Voices
+                  </button>
+                </div>
+                {state.elevenLabsVoices.length > 0 && (
+                  <p className="text-xs text-blue-400">✓ {state.elevenLabsVoices.length} voices loaded</p>
+                )}
+              </div>
+
+              {/* LLM Provider Selection */}
+              <div className="p-3 bg-purple-500/5 rounded-lg border border-purple-500/20 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
+                    <Wand2 size={18} />
                   </div>
-                  {state.elevenLabsVoices.length > 0 && (
-                    <p className="text-xs text-blue-400">✓ {state.elevenLabsVoices.length} voices loaded</p>
+                  <div>
+                    <p className="text-sm font-medium text-purple-300">Script Generation (LLM)</p>
+                    <p className="text-xs text-zinc-500">Choose AI for script generation</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                  <button
+                    onClick={() => setState(prev => ({ ...prev, llmProvider: 'gemini' }))}
+                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    onClick={() => setState(prev => ({ ...prev, llmProvider: 'openai' }))}
+                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    OpenAI
+                  </button>
+                </div>
+              </div>
+
+              {/* TTS Provider Selection */}
+              <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
+                    <Volume2 size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-amber-300">Voice Generation (TTS)</p>
+                    <p className="text-xs text-zinc-500">Choose AI for text-to-speech</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                  <button
+                    onClick={() => setState(prev => ({ ...prev, ttsProvider: 'gemini' }))}
+                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    onClick={() => setState(prev => ({ ...prev, ttsProvider: 'openai' }))}
+                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    OpenAI
+                  </button>
+                  <button
+                    onClick={() => setState(prev => ({ ...prev, ttsProvider: 'elevenlabs' }))}
+                    disabled={state.elevenLabsVoices.length === 0}
+                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
+                  >
+                    ElevenLabs
+                  </button>
+                </div>
+              </div>
+
+              {/* Use ElevenLabs for Speech Toggle */}
+              <div className={`flex items-center justify-between p-3 rounded-lg border ${state.elevenLabsVoices.length > 0 ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
+                    <Volume2 size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Use ElevenLabs for Voices</p>
+                    <p className="text-xs text-zinc-500">{state.elevenLabsVoices.length > 0 ? 'High-quality multilingual TTS' : 'Fetch voices first'}</p>
+                  </div>
+                </div>
+                <button onClick={() => setState(prev => ({ ...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech }))} disabled={state.elevenLabsVoices.length === 0}>
+                  {state.useElevenLabsForSpeech && state.elevenLabsVoices.length > 0 ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                </button>
+              </div>
+
+              {/* Narrator Toggle */}
+              <div className={`flex items-center justify-between p-3 rounded-lg border ${state.geminiApiKey ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
+                    <Mic2 size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Include Narrator</p>
+                    <p className="text-xs text-zinc-500">{state.geminiApiKey ? 'Enable narrator role' : 'Requires Gemini API key'}</p>
+                  </div>
+                </div>
+                <button onClick={() => setState(prev => ({ ...prev, includeNarrator: !prev.includeNarrator }))} disabled={!state.geminiApiKey}>
+                  {state.includeNarrator && state.geminiApiKey ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                </button>
+              </div>
+
+              {/* SFX Toggle */}
+              <div className={`flex items-center justify-between p-3 rounded-lg border ${state.elevenLabsApiKey ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
+                    <Speaker size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Sound Effects</p>
+                    <p className="text-xs text-zinc-500">{state.elevenLabsApiKey ? 'Include SFX cues (ElevenLabs)' : 'Requires ElevenLabs API key'}</p>
+                  </div>
+                </div>
+                <button onClick={() => setState(prev => ({ ...prev, enableSfx: !prev.enableSfx }))} disabled={!state.elevenLabsApiKey}>
+                  {state.enableSfx && state.elevenLabsApiKey ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
+                </button>
+              </div>
+
+              {/* Gemini API Key */}
+              <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-md">
+                    <Key size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Gemini API Key</p>
+                    <p className="text-xs text-zinc-500">For script generation (& fallback TTS)</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Enter your Gemini API Key..."
+                    value={state.geminiApiKey}
+                    onChange={(e) => setState(prev => ({ ...prev, geminiApiKey: e.target.value }))}
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                  {state.geminiApiKey && (
+                    <button
+                      onClick={() => setSaveGeminiKey(!saveGeminiKey)}
+                      className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveGeminiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                      title={saveGeminiKey ? 'Saved locally' : 'Click to save locally'}
+                    >
+                      <Save size={12} />
+                    </button>
                   )}
                 </div>
+              </div>
 
-                {/* LLM Provider Selection */}
-                <div className="p-3 bg-purple-500/5 rounded-lg border border-purple-500/20 space-y-2">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
-                      <Wand2 size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-purple-300">Script Generation (LLM)</p>
-                      <p className="text-xs text-zinc-500">Choose AI for script generation</p>
-                    </div>
+              {/* OpenAI API Key */}
+              <div className="p-3 bg-cyan-500/5 rounded-lg border border-cyan-500/20 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-md">
+                    <Key size={18} />
                   </div>
-                  <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                  <div>
+                    <p className="text-sm font-medium text-cyan-300">OpenAI API Key</p>
+                    <p className="text-xs text-zinc-500">For GPT-4o script & TTS</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Enter your OpenAI API Key..."
+                    value={state.openaiApiKey}
+                    onChange={(e) => setState(prev => ({ ...prev, openaiApiKey: e.target.value }))}
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-cyan-500"
+                  />
+                  {state.openaiApiKey && (
                     <button
-                      onClick={() => setState(prev => ({ ...prev, llmProvider: 'gemini' }))}
-                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      onClick={() => setSaveOpenaiKey(!saveOpenaiKey)}
+                      className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveOpenaiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                      title={saveOpenaiKey ? 'Saved locally' : 'Click to save locally'}
                     >
-                      Gemini
+                      <Save size={12} />
                     </button>
-                    <button
-                      onClick={() => setState(prev => ({ ...prev, llmProvider: 'openai' }))}
-                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      OpenAI
-                    </button>
-                  </div>
-                </div>
-
-                {/* TTS Provider Selection */}
-                <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 space-y-2">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
-                      <Volume2 size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-amber-300">Voice Generation (TTS)</p>
-                      <p className="text-xs text-zinc-500">Choose AI for text-to-speech</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-1 bg-zinc-950 rounded p-1">
-                    <button
-                      onClick={() => setState(prev => ({ ...prev, ttsProvider: 'gemini' }))}
-                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      Gemini
-                    </button>
-                    <button
-                      onClick={() => setState(prev => ({ ...prev, ttsProvider: 'openai' }))}
-                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      OpenAI
-                    </button>
-                    <button
-                      onClick={() => setState(prev => ({ ...prev, ttsProvider: 'elevenlabs' }))}
-                      disabled={state.elevenLabsVoices.length === 0}
-                      className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
-                    >
-                      ElevenLabs
-                    </button>
-                  </div>
-                </div>
-
-                {/* Use ElevenLabs for Speech Toggle */}
-                <div className={`flex items-center justify-between p-3 rounded-lg border ${state.elevenLabsVoices.length > 0 ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/10 text-blue-400 rounded-md">
-                      <Volume2 size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Use ElevenLabs for Voices</p>
-                      <p className="text-xs text-zinc-500">{state.elevenLabsVoices.length > 0 ? 'High-quality multilingual TTS' : 'Fetch voices first'}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setState(prev => ({ ...prev, useElevenLabsForSpeech: !prev.useElevenLabsForSpeech }))} disabled={state.elevenLabsVoices.length === 0}>
-                    {state.useElevenLabsForSpeech && state.elevenLabsVoices.length > 0 ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
-                  </button>
-                </div>
-
-                {/* Narrator Toggle */}
-                <div className={`flex items-center justify-between p-3 rounded-lg border ${state.geminiApiKey ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
-                      <Mic2 size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Include Narrator</p>
-                      <p className="text-xs text-zinc-500">{state.geminiApiKey ? 'Enable narrator role' : 'Requires Gemini API key'}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setState(prev => ({ ...prev, includeNarrator: !prev.includeNarrator }))} disabled={!state.geminiApiKey}>
-                    {state.includeNarrator && state.geminiApiKey ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
-                  </button>
-                </div>
-
-                {/* SFX Toggle */}
-                <div className={`flex items-center justify-between p-3 rounded-lg border ${state.elevenLabsApiKey ? 'bg-black/20 border-zinc-800/50' : 'bg-zinc-900/30 border-zinc-800/30 opacity-50'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-500/10 text-amber-400 rounded-md">
-                      <Speaker size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Sound Effects</p>
-                      <p className="text-xs text-zinc-500">{state.elevenLabsApiKey ? 'Include SFX cues (ElevenLabs)' : 'Requires ElevenLabs API key'}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setState(prev => ({ ...prev, enableSfx: !prev.enableSfx }))} disabled={!state.elevenLabsApiKey}>
-                    {state.enableSfx && state.elevenLabsApiKey ? <ToggleRight size={28} className="text-blue-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
-                  </button>
-                </div>
-
-                {/* Gemini API Key */}
-                <div className="p-3 bg-black/20 rounded-lg border border-zinc-800/50 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-md">
-                      <Key size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Gemini API Key</p>
-                      <p className="text-xs text-zinc-500">For script generation (& fallback TTS)</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      placeholder="Enter your Gemini API Key..."
-                      value={state.geminiApiKey}
-                      onChange={(e) => setState(prev => ({ ...prev, geminiApiKey: e.target.value }))}
-                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
-                    />
-                    {state.geminiApiKey && (
-                      <button
-                        onClick={() => setSaveGeminiKey(!saveGeminiKey)}
-                        className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveGeminiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                        title={saveGeminiKey ? 'Saved locally' : 'Click to save locally'}
-                      >
-                        <Save size={12} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* OpenAI API Key */}
-                <div className="p-3 bg-cyan-500/5 rounded-lg border border-cyan-500/20 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-md">
-                      <Key size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-cyan-300">OpenAI API Key</p>
-                      <p className="text-xs text-zinc-500">For GPT-4o script & TTS</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      placeholder="Enter your OpenAI API Key..."
-                      value={state.openaiApiKey}
-                      onChange={(e) => setState(prev => ({ ...prev, openaiApiKey: e.target.value }))}
-                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-cyan-500"
-                    />
-                    {state.openaiApiKey && (
-                      <button
-                        onClick={() => setSaveOpenaiKey(!saveOpenaiKey)}
-                        className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveOpenaiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                        title={saveOpenaiKey ? 'Saved locally' : 'Click to save locally'}
-                      >
-                        <Save size={12} />
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
+
         </section>
-      )}
+      )
+      }
 
       {/* Main Content Area */}
-      {state.cast.length > 0 && (
-        <main className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
+      {
+        state.cast.length > 0 && (
+          <main className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
 
-          {/* Left Column: Cast */}
-          <section className="lg:col-span-1 space-y-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Users size={18} className="text-blue-400" /> Cast & Voices
-            </h2>
+            {/* Left Column: Cast */}
+            <section className="lg:col-span-1 space-y-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Users size={18} className="text-blue-400" /> Cast & Voices
+              </h2>
 
-            <div className="space-y-3">
-              {state.cast.map((member, idx) => {
-                const isNarratorMember = isNarrator(member.name);
-                return (
-                  <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isNarratorMember ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                        <Mic size={18} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
-                        <p className="text-xs text-zinc-500 truncate">{member.description}</p>
-                      </div>
-                    </div>
-
-                    {/* Voice Selection */}
-                    <div className="space-y-2">
-                      {/* Voice Type Selector */}
-                      <div className="flex gap-1 bg-zinc-950 rounded p-1">
-                        <button
-                          onClick={() => handleUpdateCast(member.name, { voiceType: 'gemini' })}
-                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                        >
-                          Gemini
-                        </button>
-                        <button
-                          onClick={() => handleUpdateCast(member.name, { voiceType: 'openai' })}
-                          disabled={!state.openaiApiKey}
-                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
-                        >
-                          OpenAI
-                        </button>
-                        <button
-                          onClick={() => handleUpdateCast(member.name, { voiceType: 'elevenlabs' })}
-                          disabled={state.elevenLabsVoices.length === 0}
-                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
-                        >
-                          ElevenLabs
-                        </button>
+              <div className="space-y-3">
+                {state.cast.map((member, idx) => {
+                  const isNarratorMember = isNarrator(member.name);
+                  return (
+                    <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isNarratorMember ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                          <Mic size={18} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-bold text-sm truncate text-white">{member.name}</h4>
+                          <p className="text-xs text-zinc-500 truncate">{member.description}</p>
+                        </div>
                       </div>
 
-                      {/* Voice Dropdown with Preview */}
-                      <div className="flex gap-2">
-                        {member.voiceType === 'openai' && state.openaiApiKey ? (
-                          <>
-                            <select
-                              value={member.voice}
-                              onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
-                              className="flex-1 bg-zinc-950 border border-cyan-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
-                            >
-                              {OPENAI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                            </select>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const base64 = await generateOpenAISpeech("Hello, this is a voice preview.", member.voice, '', state.openaiApiKey);
-                                  const ctx = getAudioContext();
-                                  const buffer = await decodeAudioFile(base64, ctx);
-                                  const source = ctx.createBufferSource();
-                                  source.buffer = buffer;
-                                  source.connect(ctx.destination);
-                                  source.start();
-                                } catch (e) {
-                                  console.error("Preview failed:", e);
-                                }
-                              }}
-                              className="px-2 py-1 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded text-xs flex items-center gap-1"
-                              title="Preview voice"
-                            >
-                              <Play size={12} fill="currentColor" />
-                            </button>
-                          </>
-                        ) : member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
-                          <>
-                            <select
-                              value={member.elevenLabsVoiceId || ''}
-                              onChange={(e) => {
-                                const voice = state.elevenLabsVoices.find(v => v.voice_id === e.target.value);
-                                handleUpdateCast(member.name, {
-                                  elevenLabsVoiceId: e.target.value,
-                                  voice: voice?.name || member.voice
-                                });
-                              }}
-                              className="flex-1 min-w-0 bg-zinc-950 border border-blue-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 truncate"
-                            >
-                              <option value="">Select Voice...</option>
-                              {state.elevenLabsVoices.map(v => (
-                                <option key={v.voice_id} value={v.voice_id}>
-                                  {v.name} {v.category === 'cloned' ? '(Custom)' : ''}
-                                </option>
-                              ))}
-                            </select>
-                            {member.elevenLabsVoiceId && (
+                      {/* Voice Selection */}
+                      <div className="space-y-2">
+                        {/* Voice Type Selector */}
+                        <div className="flex gap-1 bg-zinc-950 rounded p-1">
+                          <button
+                            onClick={() => handleUpdateCast(member.name, { voiceType: 'gemini' })}
+                            className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          >
+                            Gemini
+                          </button>
+                          <button
+                            onClick={() => handleUpdateCast(member.name, { voiceType: 'openai' })}
+                            disabled={!state.openaiApiKey}
+                            className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
+                          >
+                            OpenAI
+                          </button>
+                          <button
+                            onClick={() => handleUpdateCast(member.name, { voiceType: 'elevenlabs' })}
+                            disabled={state.elevenLabsVoices.length === 0}
+                            className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
+                          >
+                            ElevenLabs
+                          </button>
+                        </div>
+
+                        {/* Voice Dropdown with Preview */}
+                        <div className="flex gap-2">
+                          {member.voiceType === 'openai' && state.openaiApiKey ? (
+                            <>
+                              <select
+                                value={member.voice}
+                                onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                                className="flex-1 bg-zinc-950 border border-cyan-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
+                              >
+                                {OPENAI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                              </select>
                               <button
-                                onClick={() => {
-                                  const voice = state.elevenLabsVoices.find(v => v.voice_id === member.elevenLabsVoiceId);
-                                  if (voice?.preview_url) {
-                                    const audio = new Audio(voice.preview_url);
-                                    audio.play();
+                                onClick={async () => {
+                                  try {
+                                    const base64 = await generateOpenAISpeech("Hello, this is a voice preview.", member.voice, '', state.openaiApiKey);
+                                    const ctx = getAudioContext();
+                                    const buffer = await decodeAudioFile(base64, ctx);
+                                    const source = ctx.createBufferSource();
+                                    source.buffer = buffer;
+                                    source.connect(ctx.destination);
+                                    source.start();
+                                  } catch (e) {
+                                    console.error("Preview failed:", e);
                                   }
                                 }}
-                                className="px-2 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs flex items-center gap-1"
+                                className="px-2 py-1 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded text-xs flex items-center gap-1"
                                 title="Preview voice"
                               >
                                 <Play size={12} fill="currentColor" />
                               </button>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <select
-                              value={member.voice}
-                              onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
-                              className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none"
-                            >
-                              {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                            </select>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const base64 = await generateSpeech("Hello, this is a voice preview.", member.voice, '', '', state.geminiApiKey);
-                                  const ctx = getAudioContext();
-                                  const buffer = await decodeRawPCM(base64, ctx);
-                                  const source = ctx.createBufferSource();
-                                  source.buffer = buffer;
-                                  source.connect(ctx.destination);
-                                  source.start();
-                                } catch (e) {
-                                  console.error("Preview failed:", e);
-                                }
-                              }}
-                              disabled={!state.geminiApiKey}
-                              className="px-2 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded text-xs flex items-center gap-1 disabled:opacity-30"
-                              title="Preview voice (requires API key)"
-                            >
-                              <Play size={12} fill="currentColor" />
-                            </button>
-                          </>
-                        )}
+                            </>
+                          ) : member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
+                            <>
+                              <select
+                                value={member.elevenLabsVoiceId || ''}
+                                onChange={(e) => {
+                                  const voice = state.elevenLabsVoices.find(v => v.voice_id === e.target.value);
+                                  handleUpdateCast(member.name, {
+                                    elevenLabsVoiceId: e.target.value,
+                                    voice: voice?.name || member.voice
+                                  });
+                                }}
+                                className="flex-1 min-w-0 bg-zinc-950 border border-blue-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 truncate"
+                              >
+                                <option value="">Select Voice...</option>
+                                {state.elevenLabsVoices.map(v => (
+                                  <option key={v.voice_id} value={v.voice_id}>
+                                    {v.name} {v.category === 'cloned' ? '(Custom)' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              {member.elevenLabsVoiceId && (
+                                <button
+                                  onClick={() => {
+                                    const voice = state.elevenLabsVoices.find(v => v.voice_id === member.elevenLabsVoiceId);
+                                    if (voice?.preview_url) {
+                                      const audio = new Audio(voice.preview_url);
+                                      audio.play();
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs flex items-center gap-1"
+                                  title="Preview voice"
+                                >
+                                  <Play size={12} fill="currentColor" />
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <select
+                                value={member.voice}
+                                onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
+                                className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none"
+                              >
+                                {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                              </select>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const base64 = await generateSpeech("Hello, this is a voice preview.", member.voice, '', '', state.geminiApiKey);
+                                    const ctx = getAudioContext();
+                                    const buffer = await decodeRawPCM(base64, ctx);
+                                    const source = ctx.createBufferSource();
+                                    source.buffer = buffer;
+                                    source.connect(ctx.destination);
+                                    source.start();
+                                  } catch (e) {
+                                    console.error("Preview failed:", e);
+                                  }
+                                }}
+                                disabled={!state.geminiApiKey}
+                                className="px-2 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded text-xs flex items-center gap-1 disabled:opacity-30"
+                                title="Preview voice (requires API key)"
+                              >
+                                <Play size={12} fill="currentColor" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Voice Prompt Editor */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-zinc-500 font-semibold uppercase">Voice Prompt (Accent/Style)</label>
+                        <textarea
+                          value={member.voicePrompt || ''}
+                          onChange={(e) => handleUpdateCast(member.name, { voicePrompt: e.target.value })}
+                          placeholder="e.g. Native Taiwanese Mandarin, warm and friendly"
+                          className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 resize-none h-12"
+                        />
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </section>
 
-                    {/* Voice Prompt Editor */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-zinc-500 font-semibold uppercase">Voice Prompt (Accent/Style)</label>
-                      <textarea
-                        value={member.voicePrompt || ''}
-                        onChange={(e) => handleUpdateCast(member.name, { voicePrompt: e.target.value })}
-                        placeholder="e.g. Native Taiwanese Mandarin, warm and friendly"
-                        className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 resize-none h-12"
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+            {/* Right Column: Script */}
+            <section className="lg:col-span-2 space-y-4">
+              <div className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-sm py-4 border-b border-zinc-800 flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <FileText size={18} className="text-blue-400" /> Script ({state.items.length} cues)
+                </h2>
+                <button
+                  onClick={handleGenerateAllAudio}
+                  disabled={isGeneratingAll}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+                >
+                  {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+                  Generate All Audio
+                </button>
+              </div>
 
-          {/* Right Column: Script */}
-          <section className="lg:col-span-2 space-y-4">
-            <div className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-sm py-4 border-b border-zinc-800 flex items-center justify-between">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <FileText size={18} className="text-blue-400" /> Script ({state.items.length} cues)
-              </h2>
-              <button
-                onClick={handleGenerateAllAudio}
-                disabled={isGeneratingAll}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
-              >
-                {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
-                Generate All Audio
-              </button>
-            </div>
+              <div className="space-y-4">
+                {state.items.map((item, index) => {
+                  const castMember = state.cast.find(c => c.name === item.character);
+                  return (
+                    <ScriptItemCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      totalItems={state.items.length}
+                      assignedVoice={castMember?.voice}
+                      voiceType={castMember?.voiceType}
+                      elevenLabsApiKey={state.elevenLabsApiKey}
+                      onUpdate={handleUpdateItem}
+                      onRemove={handleRemoveItem}
+                      onMove={handleMoveItem}
+                      onGenerateAudio={handleGenerateAudio}
+                      onGenerateSfx={handleGenerateSfx}
+                      onPreviewAudio={(buffer) => {
+                        const ctx = getAudioContext();
+                        const source = ctx.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(ctx.destination);
+                        source.start();
+                      }}
+                      isPlaying={state.currentPlayingId === item.id}
+                    />
+                  );
+                })}
+              </div>
+            </section>
 
-            <div className="space-y-4">
-              {state.items.map((item, index) => {
-                const castMember = state.cast.find(c => c.name === item.character);
-                return (
-                  <ScriptItemCard
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    totalItems={state.items.length}
-                    assignedVoice={castMember?.voice}
-                    voiceType={castMember?.voiceType}
-                    elevenLabsApiKey={state.elevenLabsApiKey}
-                    onUpdate={handleUpdateItem}
-                    onRemove={handleRemoveItem}
-                    onMove={handleMoveItem}
-                    onGenerateAudio={handleGenerateAudio}
-                    onGenerateSfx={handleGenerateSfx}
-                    onPreviewAudio={(buffer) => {
-                      const ctx = getAudioContext();
-                      const source = ctx.createBufferSource();
-                      source.buffer = buffer;
-                      source.connect(ctx.destination);
-                      source.start();
-                    }}
-                    isPlaying={state.currentPlayingId === item.id}
-                  />
-                );
-              })}
-            </div>
-          </section>
-
-        </main>
-      )}
+          </main>
+        )
+      }
 
       {/* Podcast Publishing Section */}
-      {state.items.length > 0 && (
-        <div className="max-w-5xl mx-auto pb-24">
-          <PodcastPublishSection
-            storyText={state.storyText}
-            items={state.items}
-            geminiApiKey={state.geminiApiKey}
-            openaiApiKey={state.openaiApiKey}
-            podcastInfo={state.podcastInfo}
-            onGenerateAllAudio={handleGenerateAllAudio}
-          />
-        </div>
-      )}
+      {
+        state.items.length > 0 && (
+          <div className="max-w-5xl mx-auto pb-24">
+            <PodcastPublishSection
+              key={state.scriptGenerationTimestamp}
+              storyText={state.storyText}
+              items={state.items}
+              geminiApiKey={state.geminiApiKey}
+              openaiApiKey={state.openaiApiKey}
+              podcastInfo={state.podcastInfo}
+              onGenerateAllAudio={handleGenerateAllAudio}
+            />
+          </div>
+        )
+      }
 
       {/* Persistent Footer Controls */}
-      {state.items.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 p-4 shadow-2xl z-50">
-          <div className="max-w-5xl mx-auto flex items-center justify-between">
+      {
+        state.items.length > 0 && (
+          <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 p-4 shadow-2xl z-50">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
 
-            <div className="flex items-center gap-4">
-              <button
-                onClick={togglePlay}
-                className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${state.isPlaying
-                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                  : 'bg-blue-500 text-black hover:bg-blue-400 hover:scale-105'
-                  }`}
-              >
-                {state.isPlaying ? <Square size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
-              </button>
-              <div>
-                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Now Playing</div>
-                <div className="text-sm font-medium text-zinc-200">
-                  {state.currentPlayingId
-                    ? `${state.items.findIndex(i => i.id === state.currentPlayingId) + 1}. ${state.items.find(i => i.id === state.currentPlayingId)?.type === 'speech' ? 'Dialogue' : 'SFX'}`
-                    : 'Ready to start'}
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={togglePlay}
+                  className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${state.isPlaying
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                    : 'bg-blue-500 text-black hover:bg-blue-400 hover:scale-105'
+                    }`}
+                >
+                  {state.isPlaying ? <Square size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+                </button>
+                <div>
+                  <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Now Playing</div>
+                  <div className="text-sm font-medium text-zinc-200">
+                    {state.currentPlayingId
+                      ? `${state.items.findIndex(i => i.id === state.currentPlayingId) + 1}. ${state.items.find(i => i.id === state.currentPlayingId)?.type === 'speech' ? 'Dialogue' : 'SFX'}`
+                      : 'Ready to start'}
+                  </div>
                 </div>
               </div>
+
+              <button
+                onClick={handleExportWav}
+                disabled={isExporting}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg hover:shadow-blue-500/25"
+              >
+                {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                Export WAV
+              </button>
+
             </div>
-
-            <button
-              onClick={handleExportWav}
-              disabled={isExporting}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg text-sm font-bold transition-all shadow-lg hover:shadow-blue-500/25"
-            >
-              {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-              Export WAV
-            </button>
-
           </div>
-        </div>
-      )}
+        )
+      }
 
       <Player
         items={state.items}
@@ -1021,6 +1048,6 @@ export default function App() {
         onPlayStateChange={(playing, id) => setState(prev => ({ ...prev, isPlaying: playing, currentPlayingId: id }))}
       />
 
-    </div>
+    </div >
   );
 }

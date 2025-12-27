@@ -90,4 +90,7 @@ export interface DramaState {
 
   // Auto-generated Podcast info
   podcastInfo: GeneratedPodcastInfo | null;
+
+  // Timestamp when the script was last generated
+  scriptGenerationTimestamp?: number;
 }

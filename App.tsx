@@ -953,6 +953,7 @@ export default function App() {
             geminiApiKey={state.geminiApiKey}
             openaiApiKey={state.openaiApiKey}
             podcastInfo={state.podcastInfo}
+            onGenerateAllAudio={handleGenerateAllAudio}
           />
         </div>
       )}

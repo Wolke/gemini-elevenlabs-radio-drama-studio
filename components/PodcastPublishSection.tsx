@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film } from 'lucide-react';
+import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save } from 'lucide-react';
 import { generatePodcastCoverArt, createPodcastZip, downloadBlob, PodcastMetadata, EpisodeMetadata } from '../services/podcastService';
 import { generateOpenAICoverArt } from '../services/openaiService';
 import { bufferToWav, bufferToMp3, createWebmVideo, mergeAudioBuffers } from '../utils/audioUtils';
@@ -41,12 +41,13 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     const [coverArtBase64, setCoverArtBase64] = useState<string | null>(null);
     const [imageProvider, setImageProvider] = useState<ImageProvider>('gemini');
 
-    // Podcast metadata
-    const [podcastTitle, setPodcastTitle] = useState('');
+    // Podcast metadata - load title/author from localStorage
+    const [podcastTitle, setPodcastTitle] = useState(() => localStorage.getItem('podcastTitle') || '');
+    const [podcastAuthor, setPodcastAuthor] = useState(() => localStorage.getItem('podcastAuthor') || '');
     const [podcastDescription, setPodcastDescription] = useState('');
-    const [podcastAuthor, setPodcastAuthor] = useState('');
     const [episodeTitle, setEpisodeTitle] = useState('');
     const [coverPrompt, setCoverPrompt] = useState('');
+    const [isSaved, setIsSaved] = useState(false);
 
     // Generated outputs
     const [mp3Blob, setMp3Blob] = useState<Blob | null>(null);
@@ -57,16 +58,23 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     const [isGenerating, setIsGenerating] = useState(false);
     const [steps, setSteps] = useState<GenerationStep[]>([]);
 
-    // Auto-fill from podcastInfo
+    // Auto-fill from podcastInfo (only episodeTitle, description, coverPrompt - NOT title/author)
     useEffect(() => {
         if (podcastInfo) {
-            setPodcastTitle(podcastInfo.podcastName || '');
-            setPodcastAuthor(podcastInfo.author || '');
+            // Only set episode-specific fields, not podcast title/author (those are saved)
             setEpisodeTitle(podcastInfo.episodeTitle || '');
             setPodcastDescription(podcastInfo.description || '');
             setCoverPrompt(podcastInfo.coverPrompt || '');
         }
     }, [podcastInfo]);
+
+    // Save podcast title/author to localStorage
+    const handleSavePodcastInfo = () => {
+        localStorage.setItem('podcastTitle', podcastTitle);
+        localStorage.setItem('podcastAuthor', podcastAuthor);
+        setIsSaved(true);
+        setTimeout(() => setIsSaved(false), 2000);
+    };
 
     // Calculate status
     const hasAudio = items.some(item => item.audioBuffer);
@@ -270,10 +278,10 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
 
             {/* Metadata Form - 2 columns */}
             <div className="grid grid-cols-2 gap-4">
+                {/* Podcast Name + Author + Save Button - First Row */}
                 <div className="space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
                         Podcast 名稱 *
-                        {podcastInfo?.podcastName && <Wand2 size={10} className="text-purple-400" />}
                     </label>
                     <input
                         type="text"
@@ -286,7 +294,14 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                 <div className="space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
                         作者 *
-                        {podcastInfo?.author && <Wand2 size={10} className="text-purple-400" />}
+                        <button
+                            onClick={handleSavePodcastInfo}
+                            className="ml-auto flex items-center gap-1 px-2 py-0.5 text-xs bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
+                            title="儲存 Podcast 資訊"
+                        >
+                            {isSaved ? <Check size={12} className="text-green-400" /> : <Save size={12} />}
+                            {isSaved ? '已儲存' : '儲存'}
+                        </button>
                     </label>
                     <input
                         type="text"

@@ -59,7 +59,61 @@ Generate a high-quality cover art that would look great on Spotify, Apple Podcas
         throw new Error('No image generated. Please try a different prompt.');
     }
 
-    return imagePart.inlineData.data; // Base64 encoded image
+    // Compress and resize the image to meet iTunes requirements (<500KB, 1400x1400)
+    const compressedBase64 = await compressImageForPodcast(imagePart.inlineData.data);
+    return compressedBase64;
+}
+
+/**
+ * Compress and resize image to meet iTunes podcast cover requirements
+ * - Size: 1400x1400 to 3000x3000 (we use 1400x1400 for smaller file size)
+ * - Max file size: <512KB (we aim for <400KB to be safe)
+ * - Format: JPEG (better compression than PNG)
+ */
+export async function compressImageForPodcast(base64Image: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            // Target size: 1400x1400 (iTunes minimum square size)
+            const size = 1400;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d')!;
+
+            // Fill background (in case of transparent images)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, size, size);
+
+            // Calculate scaling to fit and center
+            const scale = Math.max(size / img.width, size / img.height);
+            const x = (size - img.width * scale) / 2;
+            const y = (size - img.height * scale) / 2;
+
+            // Draw image centered and scaled to cover
+            ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+
+            // Try different quality levels to get under 400KB
+            let quality = 0.9;
+            let result = canvas.toDataURL('image/jpeg', quality);
+
+            // Keep reducing quality until file size is acceptable
+            while (quality > 0.3) {
+                result = canvas.toDataURL('image/jpeg', quality);
+                // Check size (base64 is ~33% larger than binary)
+                const sizeKB = (result.length * 0.75) / 1024;
+                if (sizeKB < 400) break;
+                quality -= 0.1;
+            }
+
+            // Remove data URL prefix to get pure base64
+            const base64 = result.replace(/^data:image\/jpeg;base64,/, '');
+            resolve(base64);
+        };
+        img.onerror = reject;
+        img.src = `data:image/png;base64,${base64Image}`;
+    });
 }
 
 // === RSS Feed Generation ===

@@ -132,8 +132,12 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                 try {
                     const prompt = coverPrompt || `Based on this story: "${storyText.slice(0, 500)}..."`;
                     if (imageProvider === 'openai' && hasOpenaiKey) {
-                        cover = await generateOpenAICoverArt(prompt, openaiApiKey);
+                        const rawCover = await generateOpenAICoverArt(prompt, openaiApiKey);
+                        // Compress for iTunes compatibility (<500KB)
+                        const { compressImageForPodcast } = await import('../services/podcastService');
+                        cover = await compressImageForPodcast(rawCover);
                     } else if (hasGeminiKey) {
+                        // Gemini already compresses in generatePodcastCoverArt
                         cover = await generatePodcastCoverArt(prompt, podcastTitle, geminiApiKey);
                     }
                     setCoverArtBase64(cover);

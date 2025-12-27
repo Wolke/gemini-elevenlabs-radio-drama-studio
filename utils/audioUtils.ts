@@ -37,7 +37,8 @@ export async function decodeAudioFile(
 ): Promise<AudioBuffer> {
   const bytes = decodeBase64(base64Data);
   // Copy to a fresh ArrayBuffer because decodeAudioData detaches the buffer
-  const arrayBuffer = bytes.buffer.slice(0); 
+  const arrayBuffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(arrayBuffer).set(bytes);
   return await ctx.decodeAudioData(arrayBuffer);
 }
 
@@ -122,9 +123,9 @@ export function bufferToWav(buffer: AudioBuffer): Blob {
   while (pos < buffer.length) {
     for (i = 0; i < numOfChan; i++) {
       // clamp
-      sample = Math.max(-1, Math.min(1, channels[i][pos])); 
+      sample = Math.max(-1, Math.min(1, channels[i][pos]));
       // scale to 16-bit signed int
-      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; 
+      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
       view.setInt16(44 + offset, sample, true);
       offset += 2;
     }
@@ -157,4 +158,102 @@ export function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+/**
+ * Encodes an AudioBuffer to MP3 format using lamejs
+ */
+export async function bufferToMp3(buffer: AudioBuffer): Promise<Blob> {
+  // Dynamic import lamejs
+  const lamejs = await import('lamejs');
+
+  const mp3encoder = new lamejs.Mp3Encoder(1, buffer.sampleRate, 128); // mono, sample rate, 128kbps
+  const samples = buffer.getChannelData(0);
+
+  // Convert Float32Array to Int16Array
+  const sampleBlockSize = 1152; // must be multiple of 576
+  const int16Samples = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+
+  const mp3Data: Int8Array[] = [];
+
+  // Encode in blocks
+  for (let i = 0; i < int16Samples.length; i += sampleBlockSize) {
+    const sampleChunk = int16Samples.subarray(i, i + sampleBlockSize);
+    const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
+    if (mp3buf.length > 0) {
+      mp3Data.push(new Int8Array(mp3buf));
+    }
+  }
+
+  // Flush remaining data
+  const mp3buf = mp3encoder.flush();
+  if (mp3buf.length > 0) {
+    mp3Data.push(new Int8Array(mp3buf));
+  }
+
+  // Convert Int8Array[] to ArrayBuffer[] for Blob compatibility
+  const blobParts: ArrayBuffer[] = mp3Data.map(arr => arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer);
+
+  return new Blob(blobParts, { type: 'audio/mp3' });
+}
+
+/**
+ * Creates an MP4 video with static image and audio using FFmpeg WASM
+ * @param audioBlob - Audio file (WAV or MP3)
+ * @param imageBase64 - Base64 encoded cover image (PNG/JPG)
+ * @returns MP4 video blob
+ */
+export async function createMp4Video(
+  audioBlob: Blob,
+  imageBase64: string
+): Promise<Blob> {
+  // Dynamic import FFmpeg
+  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+  const { fetchFile, toBlobURL } = await import('@ffmpeg/util');
+
+  const ffmpeg = new FFmpeg();
+
+  // Load FFmpeg WASM
+  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+  });
+
+  // Write audio file
+  const audioData = await fetchFile(audioBlob);
+  await ffmpeg.writeFile('audio.wav', audioData);
+
+  // Write image file
+  const imageBytes = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0));
+  await ffmpeg.writeFile('cover.png', imageBytes);
+
+  // Create MP4: loop image for duration of audio, add audio track
+  await ffmpeg.exec([
+    '-loop', '1',           // Loop the image
+    '-i', 'cover.png',      // Input image
+    '-i', 'audio.wav',      // Input audio
+    '-c:v', 'libx264',      // Video codec: H.264
+    '-tune', 'stillimage',  // Optimize for still image
+    '-c:a', 'aac',          // Audio codec: AAC
+    '-b:a', '192k',         // Audio bitrate
+    '-pix_fmt', 'yuv420p',  // Pixel format for compatibility
+    '-shortest',            // End when shortest input ends (audio)
+    '-movflags', '+faststart', // Optimize for web playback
+    'output.mp4'
+  ]);
+
+  // Read the output file
+  const data = await ffmpeg.readFile('output.mp4');
+
+  // Convert to ArrayBuffer for Blob compatibility
+  const buffer = data instanceof Uint8Array
+    ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+    : data;
+
+  return new Blob([buffer], { type: 'video/mp4' });
 }

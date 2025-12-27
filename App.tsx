@@ -7,6 +7,7 @@ import { generateElevenLabsSfx, generateElevenLabsSpeech, fetchElevenLabsVoices 
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
+import { PodcastPublishSection } from './components/PodcastPublishSection';
 import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw } from 'lucide-react';
 
 const GEMINI_VOICES = [
@@ -50,6 +51,8 @@ export default function App() {
       openaiApiKey: savedOpenaiKey,
       llmProvider: savedLlmProvider,
       ttsProvider: savedTtsProvider,
+      // Podcast info
+      podcastInfo: null,
     };
   });
 
@@ -141,7 +144,7 @@ export default function App() {
       // Only enable SFX if the setting is on AND we have an ElevenLabs API key to generate them
       const shouldIncludeSfx = state.enableSfx && !!state.elevenLabsApiKey;
 
-      let cast, scenes, items;
+      let cast, scenes, items, podcastInfo;
 
       if (state.llmProvider === 'openai') {
         const result = await generateScriptFromStoryOpenAI(
@@ -154,6 +157,7 @@ export default function App() {
         cast = result.cast;
         scenes = result.scenes;
         items = result.items;
+        podcastInfo = result.podcastInfo;
       } else {
         const result = await generateScriptFromStory(
           state.storyText,
@@ -165,6 +169,7 @@ export default function App() {
         cast = result.cast;
         scenes = result.scenes;
         items = result.items;
+        podcastInfo = result.podcastInfo;
       }
 
       // Set voiceType based on ttsProvider and whether AI assigned an ElevenLabs voice
@@ -190,7 +195,7 @@ export default function App() {
         return { ...member, voiceType: 'gemini' as const };
       });
 
-      setState(prev => ({ ...prev, cast: finalCast, scenes, items, isGeneratingScript: false }));
+      setState(prev => ({ ...prev, cast: finalCast, scenes, items, podcastInfo, isGeneratingScript: false }));
       setIsConfigExpanded(false);
     } catch (e: any) {
       setError(e.message || "Failed to generate script.");
@@ -937,6 +942,19 @@ export default function App() {
           </section>
 
         </main>
+      )}
+
+      {/* Podcast Publishing Section */}
+      {state.items.length > 0 && (
+        <div className="max-w-5xl mx-auto pb-24">
+          <PodcastPublishSection
+            storyText={state.storyText}
+            items={state.items}
+            geminiApiKey={state.geminiApiKey}
+            openaiApiKey={state.openaiApiKey}
+            podcastInfo={state.podcastInfo}
+          />
+        </div>
       )}
 
       {/* Persistent Footer Controls */}

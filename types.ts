@@ -7,6 +7,7 @@ export enum ItemType {
 export type LlmProvider = 'gemini' | 'openai';
 export type TtsProvider = 'gemini' | 'openai' | 'elevenlabs';
 export type VoiceType = 'gemini' | 'openai' | 'elevenlabs';
+export type ImageProvider = 'gemini' | 'openai';
 
 export interface ElevenLabsVoice {
   voice_id: string;
@@ -52,6 +53,16 @@ export interface CharacterVoice {
   voiceName: string;
 }
 
+// Auto-generated Podcast metadata from script generation
+export interface GeneratedPodcastInfo {
+  podcastName: string;        // Podcast 名稱
+  author: string;             // 作者
+  episodeTitle: string;       // 本集標題
+  description: string;        // Podcast 描述
+  coverPrompt: string;        // 封面圖生成提示
+  tags?: string[];            // 標籤
+}
+
 export interface DramaState {
   storyText: string;
   cast: CastMember[];
@@ -76,4 +87,7 @@ export interface DramaState {
   // ElevenLabs voices cache
   elevenLabsVoices: ElevenLabsVoice[];
   isLoadingVoices: boolean;
+
+  // Auto-generated Podcast info
+  podcastInfo: GeneratedPodcastInfo | null;
 }

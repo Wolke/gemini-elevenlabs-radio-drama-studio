@@ -143,5 +143,23 @@ export const buildScriptInstructionsGemini = (sfxInstructions: string): string =
      - 'expression': A direction for HOW it should be spoken (IN ENGLISH).
    ${sfxInstructions}
 
-Return a JSON object with keys "cast", "scenes", and "script".`;
+Return a JSON object with keys "cast", "scenes", "script", and "podcastInfo".`;
+};
+
+/**
+ * Get Podcast metadata generation instructions
+ */
+export const getPodcastMetadataInstructions = (): string => {
+    return `4. **Podcast Info**: Generate metadata for podcast publishing.
+   - 'podcastName': A catchy name for this podcast series (IN THE STORY'S LANGUAGE, e.g., "深夜廣播劇場", "Midnight Radio Drama")
+   - 'author': A suitable author/creator name (IN THE STORY'S LANGUAGE, e.g., "聲優工作室", "Voice Studio")
+   - 'episodeTitle': Title for this episode (IN THE STORY'S LANGUAGE, e.g., "第一集：故事開始", "Episode 1: The Beginning")
+   - 'description': A compelling 2-3 sentence description of the episode content for podcast platforms (IN THE STORY'S LANGUAGE)
+   - 'coverPrompt': A detailed ENGLISH prompt for AI image generation to create podcast cover art. Include:
+     * Visual style (e.g., "modern illustration", "vintage radio aesthetic", "cinematic", "anime style")
+     * Key visual elements from the story (objects, atmosphere, mood)
+     * Color palette suggestions
+     * Typography style for the title
+     Example: "A vintage radio microphone glowing in a dark studio, surrounded by ethereal blue mist and floating musical notes. Art deco style with gold and deep purple tones. Modern clean typography for the title."
+   - 'tags': Array of 3-5 relevant tags for discoverability (IN ENGLISH, e.g., ["drama", "mystery", "chinese", "audio-fiction"])`;
 };

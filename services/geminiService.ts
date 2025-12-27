@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ItemType, ScriptItem, CastMember, SceneDefinition, ElevenLabsVoice } from "../types";
+import { ItemType, ScriptItem, CastMember, SceneDefinition, ElevenLabsVoice, GeneratedPodcastInfo } from "../types";
 import {
   getSfxInstructions,
   getNarratorInstructions,
@@ -9,6 +9,7 @@ import {
   buildCastInstructions,
   buildScriptInstructionsGemini,
   getSystemPromptIntro,
+  getPodcastMetadataInstructions,
 } from "./promptTemplates";
 
 // Helper to get or create Gemini client
@@ -25,6 +26,14 @@ interface GeneratedScriptResponse {
   cast: CastMember[];
   scenes: { name: string; visualDescription: string }[];
   script: any[];
+  podcastInfo?: {
+    podcastName: string;
+    author: string;
+    episodeTitle: string;
+    description: string;
+    coverPrompt: string;
+    tags?: string[];
+  };
 }
 
 const ALL_VOICES = [
@@ -42,8 +51,8 @@ export const generateScriptFromStory = async (
   includeNarrator: boolean = true,
   elevenLabsVoices: ElevenLabsVoice[] = [],
   apiKey?: string
-): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[] }> => {
-  if (!story.trim()) return { cast: [], scenes: [], items: [] };
+): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[], podcastInfo: GeneratedPodcastInfo | null }> => {
+  if (!story.trim()) return { cast: [], scenes: [], items: [], podcastInfo: null };
   const ai = getAI(apiKey);
 
   const sfxInstructions = getSfxInstructions(includeSfx);
@@ -51,7 +60,7 @@ export const generateScriptFromStory = async (
 
   const prompt = `
     ${getSystemPromptIntro()}
-    Convert the following story into a detailed radio drama script with a cast list, a list of scenes (locations), and a sequence of cues.
+    Convert the following story into a detailed radio drama script with a cast list, a list of scenes (locations), a sequence of cues, and podcast metadata.
     
     ${getLanguageInstructions()}
 
@@ -61,6 +70,8 @@ export const generateScriptFromStory = async (
     ${getScenesInstructions()}
 
     ${buildScriptInstructionsGemini(sfxInstructions)}
+
+    ${getPodcastMetadataInstructions()}
 
     Story:
     "${story}"
@@ -118,9 +129,21 @@ export const generateScriptFromStory = async (
                 },
                 required: ["type", "location"],
               },
+            },
+            podcastInfo: {
+              type: Type.OBJECT,
+              properties: {
+                podcastName: { type: Type.STRING, description: "Podcast series name" },
+                author: { type: Type.STRING, description: "Author/creator name" },
+                episodeTitle: { type: Type.STRING, description: "Episode title" },
+                description: { type: Type.STRING, description: "Episode description" },
+                coverPrompt: { type: Type.STRING, description: "AI image generation prompt for cover art" },
+                tags: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Tags for discoverability" },
+              },
+              required: ["podcastName", "author", "episodeTitle", "description", "coverPrompt"]
             }
           },
-          required: ["cast", "scenes", "script"]
+          required: ["cast", "scenes", "script", "podcastInfo"]
         },
       },
     });
@@ -149,13 +172,24 @@ export const generateScriptFromStory = async (
       id: crypto.randomUUID(),
     }));
 
-    return { cast, scenes, items };
+    // Process Podcast Info
+    const podcastInfo: GeneratedPodcastInfo | null = data.podcastInfo ? {
+      podcastName: data.podcastInfo.podcastName,
+      author: data.podcastInfo.author,
+      episodeTitle: data.podcastInfo.episodeTitle,
+      description: data.podcastInfo.description,
+      coverPrompt: data.podcastInfo.coverPrompt,
+      tags: data.podcastInfo.tags,
+    } : null;
+
+    return { cast, scenes, items, podcastInfo };
 
   } catch (error) {
     console.error("Error generating script:", error);
     throw error;
   }
 };
+
 
 export const generateSpeech = async (
   text: string,

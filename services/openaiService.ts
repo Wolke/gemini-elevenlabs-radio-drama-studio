@@ -1,7 +1,7 @@
 
 // Service for interacting with OpenAI API
 
-import { ItemType, ScriptItem, CastMember, SceneDefinition, ElevenLabsVoice } from '../types';
+import { ItemType, ScriptItem, CastMember, SceneDefinition, ElevenLabsVoice, GeneratedPodcastInfo } from '../types';
 import {
     getSfxInstructions,
     getNarratorInstructions,
@@ -10,6 +10,7 @@ import {
     buildCastInstructions,
     buildScriptInstructionsOpenAI,
     getSystemPromptIntro,
+    getPodcastMetadataInstructions,
 } from './promptTemplates';
 
 // OpenAI TTS available voices
@@ -23,6 +24,14 @@ interface GeneratedScriptResponse {
     cast: CastMember[];
     scenes: { name: string; visualDescription: string }[];
     script: any[];
+    podcastInfo?: {
+        podcastName: string;
+        author: string;
+        episodeTitle: string;
+        description: string;
+        coverPrompt: string;
+        tags?: string[];
+    };
 }
 
 /**
@@ -34,8 +43,8 @@ export const generateScriptFromStoryOpenAI = async (
     includeNarrator: boolean = true,
     elevenLabsVoices: ElevenLabsVoice[] = [],
     apiKey?: string
-): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[] }> => {
-    if (!story.trim()) return { cast: [], scenes: [], items: [] };
+): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[], podcastInfo: GeneratedPodcastInfo | null }> => {
+    if (!story.trim()) return { cast: [], scenes: [], items: [], podcastInfo: null };
 
     const key = apiKey || '';
     if (!key) {
@@ -54,7 +63,9 @@ ${buildCastInstructions(OPENAI_VOICES.join(', '), elevenLabsVoices, narratorInst
 
 ${getScenesInstructions()}
 
-${buildScriptInstructionsOpenAI(sfxInstructions)}`;
+${buildScriptInstructionsOpenAI(sfxInstructions)}
+
+${getPodcastMetadataInstructions()}`;
 
     const userPrompt = `Convert this story into a radio drama script:\n\n"${story}"`;
 
@@ -111,13 +122,81 @@ ${buildScriptInstructionsOpenAI(sfxInstructions)}`;
             id: crypto.randomUUID(),
         }));
 
-        return { cast, scenes, items };
+        // Process Podcast Info
+        const podcastInfo: GeneratedPodcastInfo | null = data.podcastInfo ? {
+            podcastName: data.podcastInfo.podcastName,
+            author: data.podcastInfo.author,
+            episodeTitle: data.podcastInfo.episodeTitle,
+            description: data.podcastInfo.description,
+            coverPrompt: data.podcastInfo.coverPrompt,
+            tags: data.podcastInfo.tags,
+        } : null;
+
+        return { cast, scenes, items, podcastInfo };
 
     } catch (error) {
         console.error("Error generating script with OpenAI:", error);
         throw error;
     }
 };
+
+/**
+ * Generate cover art using OpenAI DALL-E 3
+ * @param prompt - Description of the desired cover art
+ * @param apiKey - OpenAI API key
+ * @returns base64 encoded image data
+ */
+export const generateOpenAICoverArt = async (
+    prompt: string,
+    apiKey: string
+): Promise<string> => {
+    console.log("--- [OpenAI] Generate Cover Art ---");
+    console.log(`Prompt: ${prompt}`);
+    console.log("-----------------------------------");
+
+    const enhancedPrompt = `Create a professional podcast cover art image (square format, suitable for podcast platforms like Spotify, Apple Podcasts, YouTube Music).
+
+Style requirements:
+- Modern, clean design with bold visual impact
+- Professional radio drama / audio storytelling aesthetic
+- High contrast, eye-catching colors
+- Suitable for small thumbnail display
+
+Context: ${prompt}`;
+
+    try {
+        const response = await fetch('https://api.openai.com/v1/images/generations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: 'dall-e-3',
+                prompt: enhancedPrompt,
+                n: 1,
+                size: '1024x1024',
+                quality: 'standard',
+                response_format: 'b64_json',
+            }),
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(`OpenAI DALL-E Error: ${err.error?.message || response.statusText}`);
+        }
+
+        const result = await response.json();
+        const base64Image = result.data?.[0]?.b64_json;
+        if (!base64Image) throw new Error("No image data returned from DALL-E");
+
+        return base64Image;
+    } catch (error) {
+        console.error("Error generating cover art with OpenAI:", error);
+        throw error;
+    }
+};
+
 
 /**
  * Generate speech using OpenAI TTS API

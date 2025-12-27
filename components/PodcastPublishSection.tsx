@@ -16,7 +16,7 @@ interface PodcastPublishSectionProps {
     geminiApiKey: string;
     openaiApiKey: string;
     podcastInfo: GeneratedPodcastInfo | null;
-    onGenerateAllAudio?: () => Promise<void>;
+    onGenerateAllAudio?: () => Promise<AudioBuffer[]>;
 }
 
 // Generation step status
@@ -105,21 +105,22 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
 
         try {
             // Step 1: Generate all audio if not done
+            let buffers: AudioBuffer[] = items
+                .map(i => i.audioBuffer)
+                .filter((b): b is AudioBuffer => !!b);
+
             if (!allAudioGenerated && onGenerateAllAudio) {
                 updateStep('audio', 'running');
-                await onGenerateAllAudio();
+                buffers = await onGenerateAllAudio();
                 updateStep('audio', 'done');
             } else {
                 updateStep('audio', 'done');
             }
 
-            // Merge audio
-            const buffers = items
-                .map(i => i.audioBuffer)
-                .filter((b): b is AudioBuffer => !!b);
-
+            // If still no buffers after generation, throw error
             if (buffers.length === 0) {
-                throw new Error('沒有可用的音訊');
+                updateStep('audio', 'error', '沒有可用的音訊');
+                throw new Error('沒有可用的音訊。請先個別生成音訊後再試。');
             }
 
             const mergedBuffer = await mergeAudioBuffers(buffers);
@@ -333,6 +334,18 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                         value={podcastDescription}
                         onChange={(e) => setPodcastDescription(e.target.value)}
                         placeholder="簡短描述你的 Podcast 內容..."
+                        className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500 resize-none h-16"
+                    />
+                </div>
+                <div className="col-span-2 space-y-1">
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                        封面圖提示詞
+                        {podcastInfo?.coverPrompt && <Wand2 size={10} className="text-purple-400" />}
+                    </label>
+                    <textarea
+                        value={coverPrompt}
+                        onChange={(e) => setCoverPrompt(e.target.value)}
+                        placeholder="描述封面圖的風格和內容，例：一個復古風格的收音機在深夜發光..."
                         className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500 resize-none h-16"
                     />
                 </div>

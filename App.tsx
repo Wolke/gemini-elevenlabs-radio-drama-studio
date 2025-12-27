@@ -234,7 +234,7 @@ export default function App() {
     }));
   };
 
-  const handleGenerateAudio = async (id: string, text: string, voice: string, expression: string) => {
+  const handleGenerateAudio = async (id: string, text: string, voice: string, expression: string): Promise<AudioBuffer | null> => {
     handleUpdateItem(id, { isLoadingAudio: true, generationError: undefined });
     try {
       const ctx = getAudioContext();
@@ -271,19 +271,21 @@ export default function App() {
         isLoadingAudio: false,
         generationError: undefined
       });
+      return buffer;
     } catch (e: any) {
       console.error(e);
       handleUpdateItem(id, {
         isLoadingAudio: false,
         generationError: e.message || "Unknown error occurred"
       });
+      return null;
     }
   };
 
-  const handleGenerateSfx = async (id: string, description: string) => {
+  const handleGenerateSfx = async (id: string, description: string): Promise<AudioBuffer | null> => {
     if (!state.elevenLabsApiKey) {
       alert("Please enter an ElevenLabs API Key in settings first.");
-      return;
+      return null;
     }
     handleUpdateItem(id, { isLoadingAudio: true, generationError: undefined });
     try {
@@ -296,33 +298,49 @@ export default function App() {
         isLoadingAudio: false,
         generationError: undefined
       });
+      return buffer;
     } catch (e: any) {
       console.error(e);
       handleUpdateItem(id, {
         isLoadingAudio: false,
         generationError: e.message || "Failed to generate SFX"
       });
+      return null;
     }
   };
 
-  const handleGenerateAllAudio = async () => {
-    if (state.items.length === 0) return;
+  const handleGenerateAllAudio = async (): Promise<AudioBuffer[]> => {
+    if (state.items.length === 0) return [];
     setIsGeneratingAll(true);
-    const itemsToProcess = state.items.filter(item =>
-      (item.type === ItemType.SPEECH && !item.audioBuffer) ||
-      (item.type === ItemType.SFX && !item.audioBuffer && state.elevenLabsApiKey && item.sfxDescription)
-    );
 
-    for (const item of itemsToProcess) {
-      if (item.type === ItemType.SPEECH && item.text) {
+    const resultBuffers: (AudioBuffer | null)[] = [];
+
+    // Process each item in order
+    for (const item of state.items) {
+      if (item.audioBuffer) {
+        // Already has audio, use it
+        resultBuffers.push(item.audioBuffer);
+      } else if (item.type === ItemType.SPEECH && item.text) {
+        // Generate speech
         const char = state.cast.find(c => c.name === item.character);
-        await handleGenerateAudio(item.id, item.text, char?.voice || 'Puck', item.expression || '');
-      } else if (item.type === ItemType.SFX && item.sfxDescription) {
-        await handleGenerateSfx(item.id, item.sfxDescription);
+        const buffer = await handleGenerateAudio(item.id, item.text, char?.voice || 'Puck', item.expression || '');
+        resultBuffers.push(buffer);
+        await new Promise(r => setTimeout(r, 300));
+      } else if (item.type === ItemType.SFX && item.sfxDescription && state.elevenLabsApiKey) {
+        // Generate SFX
+        const buffer = await handleGenerateSfx(item.id, item.sfxDescription);
+        resultBuffers.push(buffer);
+        await new Promise(r => setTimeout(r, 300));
+      } else {
+        // Skip items that can't be processed
+        resultBuffers.push(null);
       }
-      await new Promise(r => setTimeout(r, 500));
     }
+
     setIsGeneratingAll(false);
+
+    // Return only non-null buffers
+    return resultBuffers.filter((b): b is AudioBuffer => !!b);
   };
 
   const handleExportWav = async () => {

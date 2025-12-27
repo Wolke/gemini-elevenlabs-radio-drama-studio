@@ -161,45 +161,59 @@ export function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Encodes an AudioBuffer to MP3 format using lamejs
+ * Encodes an AudioBuffer to MP3 format using @breezystack/lamejs
+ * Falls back to WAV if MP3 encoding fails
  */
 export async function bufferToMp3(buffer: AudioBuffer): Promise<Blob> {
-  // Dynamic import lamejs
-  const lamejs = await import('lamejs');
+  try {
+    // Import the ES module compatible version of lamejs
+    const { Mp3Encoder } = await import('@breezystack/lamejs');
 
-  const mp3encoder = new lamejs.Mp3Encoder(1, buffer.sampleRate, 128); // mono, sample rate, 128kbps
-  const samples = buffer.getChannelData(0);
+    const mp3encoder = new Mp3Encoder(1, buffer.sampleRate, 128); // mono, sample rate, 128kbps
+    const samples = buffer.getChannelData(0);
 
-  // Convert Float32Array to Int16Array
-  const sampleBlockSize = 1152; // must be multiple of 576
-  const int16Samples = new Int16Array(samples.length);
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-
-  const mp3Data: Int8Array[] = [];
-
-  // Encode in blocks
-  for (let i = 0; i < int16Samples.length; i += sampleBlockSize) {
-    const sampleChunk = int16Samples.subarray(i, i + sampleBlockSize);
-    const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
-    if (mp3buf.length > 0) {
-      mp3Data.push(new Int8Array(mp3buf));
+    // Convert Float32Array to Int16Array
+    const sampleBlockSize = 1152; // must be multiple of 576
+    const int16Samples = new Int16Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
+
+    const mp3Data: Uint8Array[] = [];
+
+    // Encode in blocks
+    for (let i = 0; i < int16Samples.length; i += sampleBlockSize) {
+      const sampleChunk = int16Samples.subarray(i, i + sampleBlockSize);
+      const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
+      if (mp3buf.length > 0) {
+        mp3Data.push(new Uint8Array(mp3buf));
+      }
+    }
+
+    // Flush remaining data
+    const mp3buf = mp3encoder.flush();
+    if (mp3buf.length > 0) {
+      mp3Data.push(new Uint8Array(mp3buf));
+    }
+
+    // Combine all chunks into one Uint8Array
+    const totalLength = mp3Data.reduce((acc, arr) => acc + arr.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of mp3Data) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    return new Blob([result.buffer], { type: 'audio/mp3' });
+  } catch (error) {
+    console.warn('MP3 encoding failed, using WAV format instead:', error);
+    // Fallback to WAV if MP3 encoding fails
+    return bufferToWav(buffer);
   }
-
-  // Flush remaining data
-  const mp3buf = mp3encoder.flush();
-  if (mp3buf.length > 0) {
-    mp3Data.push(new Int8Array(mp3buf));
-  }
-
-  // Convert Int8Array[] to ArrayBuffer[] for Blob compatibility
-  const blobParts: ArrayBuffer[] = mp3Data.map(arr => arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer);
-
-  return new Blob(blobParts, { type: 'audio/mp3' });
 }
+
 
 /**
  * Creates an MP4 video with static image and audio using FFmpeg WASM

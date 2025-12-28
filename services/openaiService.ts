@@ -42,7 +42,8 @@ export const generateScriptFromStoryOpenAI = async (
     includeSfx: boolean = true,
     includeNarrator: boolean = true,
     elevenLabsVoices: ElevenLabsVoice[] = [],
-    apiKey?: string
+    apiKey?: string,
+    model: string = 'gpt-4o'
 ): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[], podcastInfo: GeneratedPodcastInfo | null }> => {
     if (!story.trim()) return { cast: [], scenes: [], items: [], podcastInfo: null };
 
@@ -75,21 +76,30 @@ ${getPodcastMetadataInstructions()}`;
     console.log("---------------------------------------");
 
     try {
+        // o-series reasoning models (o1, o3, etc.) don't support temperature parameter
+        const isReasoningModel = model.startsWith('o1') || model.startsWith('o3');
+
+        const requestBody: Record<string, any> = {
+            model: model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ],
+            response_format: { type: 'json_object' },
+        };
+
+        // Only add temperature for non-reasoning models
+        if (!isReasoningModel) {
+            requestBody.temperature = 0.7;
+        }
+
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${key}`,
             },
-            body: JSON.stringify({
-                model: 'gpt-4o',
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                response_format: { type: 'json_object' },
-                temperature: 0.7,
-            }),
+            body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) {

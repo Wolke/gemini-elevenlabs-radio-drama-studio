@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType, LlmProvider, TtsProvider } from './types';
+import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType, LlmProvider, TtsProvider, GeminiModel, OpenAIModel, GEMINI_MODELS, OPENAI_MODELS } from './types';
 import { generateScriptFromStory, generateSpeech } from './services/geminiService';
 import { generateScriptFromStoryOpenAI, generateOpenAISpeech, OPENAI_VOICES } from './services/openaiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech, fetchElevenLabsVoices } from './services/elevenLabsService';
@@ -32,6 +32,8 @@ export default function App() {
     const savedOpenaiKey = localStorage.getItem('openaiApiKey') || '';
     const savedLlmProvider = (localStorage.getItem('llmProvider') as LlmProvider) || 'gemini';
     const savedTtsProvider = (localStorage.getItem('ttsProvider') as TtsProvider) || 'gemini';
+    const savedGeminiModel = (localStorage.getItem('geminiModel') as GeminiModel) || 'gemini-2.5-flash';
+    const savedOpenaiModel = (localStorage.getItem('openaiModel') as OpenAIModel) || 'gpt-4o';
     return {
       storyText: '',
       cast: [],
@@ -51,6 +53,9 @@ export default function App() {
       openaiApiKey: savedOpenaiKey,
       llmProvider: savedLlmProvider,
       ttsProvider: savedTtsProvider,
+      // Model selection
+      geminiModel: savedGeminiModel,
+      openaiModel: savedOpenaiModel,
       // Podcast info
       podcastInfo: null,
     };
@@ -106,11 +111,13 @@ export default function App() {
     }
   }, [saveOpenaiKey, state.openaiApiKey]);
 
-  // Save provider selections
+  // Save provider and model selections
   React.useEffect(() => {
     localStorage.setItem('llmProvider', state.llmProvider);
     localStorage.setItem('ttsProvider', state.ttsProvider);
-  }, [state.llmProvider, state.ttsProvider]);
+    localStorage.setItem('geminiModel', state.geminiModel);
+    localStorage.setItem('openaiModel', state.openaiModel);
+  }, [state.llmProvider, state.ttsProvider, state.geminiModel, state.openaiModel]);
 
   // Fetch ElevenLabs voices when API key changes
   const handleFetchVoices = async () => {
@@ -160,7 +167,8 @@ export default function App() {
           shouldIncludeSfx,
           state.includeNarrator,
           state.elevenLabsVoices,
-          state.openaiApiKey
+          state.openaiApiKey,
+          state.openaiModel
         );
         cast = result.cast;
         scenes = result.scenes;
@@ -172,7 +180,8 @@ export default function App() {
           shouldIncludeSfx,
           state.includeNarrator,
           state.elevenLabsVoices,
-          state.geminiApiKey
+          state.geminiApiKey,
+          state.geminiModel
         );
         cast = result.cast;
         scenes = result.scenes;
@@ -529,7 +538,7 @@ export default function App() {
             className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
-            Generate Script & Cast ({state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'})
+            Generate Script & Cast ({state.llmProvider === 'openai' ? state.openaiModel : state.geminiModel})
           </button>
           {(state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey) && <p className="text-amber-400 text-xs text-center">⚠ Enter {state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API Key first</p>}
           {error && <p className="text-red-400 text-xs text-center">{error}</p>}
@@ -588,7 +597,7 @@ export default function App() {
               </div>
 
               {/* LLM Provider Selection */}
-              <div className="p-3 bg-purple-500/5 rounded-lg border border-purple-500/20 space-y-2">
+              <div className="p-3 bg-purple-500/5 rounded-lg border border-purple-500/20 space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
                     <Wand2 size={18} />
@@ -611,6 +620,31 @@ export default function App() {
                   >
                     OpenAI
                   </button>
+                </div>
+                {/* Model Selection Dropdown */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-zinc-400 font-medium min-w-[50px]">Model:</label>
+                  {state.llmProvider === 'gemini' ? (
+                    <select
+                      value={state.geminiModel}
+                      onChange={(e) => setState(prev => ({ ...prev, geminiModel: e.target.value as GeminiModel }))}
+                      className="flex-1 bg-zinc-950 border border-emerald-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500"
+                    >
+                      {GEMINI_MODELS.map(model => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={state.openaiModel}
+                      onChange={(e) => setState(prev => ({ ...prev, openaiModel: e.target.value as OpenAIModel }))}
+                      className="flex-1 bg-zinc-950 border border-cyan-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
+                    >
+                      {OPENAI_MODELS.map(model => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 

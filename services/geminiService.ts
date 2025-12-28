@@ -50,7 +50,8 @@ export const generateScriptFromStory = async (
   includeSfx: boolean = true,
   includeNarrator: boolean = true,
   elevenLabsVoices: ElevenLabsVoice[] = [],
-  apiKey?: string
+  apiKey?: string,
+  model: string = 'gemini-2.5-flash'
 ): Promise<{ cast: CastMember[], scenes: SceneDefinition[], items: ScriptItem[], podcastInfo: GeneratedPodcastInfo | null }> => {
   if (!story.trim()) return { cast: [], scenes: [], items: [], podcastInfo: null };
   const ai = getAI(apiKey);
@@ -83,7 +84,7 @@ export const generateScriptFromStory = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",

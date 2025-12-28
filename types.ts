@@ -9,6 +9,26 @@ export type TtsProvider = 'gemini' | 'openai' | 'elevenlabs';
 export type VoiceType = 'gemini' | 'openai' | 'elevenlabs';
 export type ImageProvider = 'gemini' | 'openai';
 
+// Available Gemini models for script generation
+export const GEMINI_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-3-flash-preview',
+  'gemini-3-pro-preview',
+] as const;
+export type GeminiModel = typeof GEMINI_MODELS[number];
+
+// Available OpenAI models for script generation
+export const OPENAI_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'o1',
+  'o1-mini',
+  'o3-mini',
+] as const;
+export type OpenAIModel = typeof OPENAI_MODELS[number];
+
 export interface ElevenLabsVoice {
   voice_id: string;
   name: string;
@@ -83,6 +103,10 @@ export interface DramaState {
   openaiApiKey: string;
   llmProvider: LlmProvider;
   ttsProvider: TtsProvider;
+
+  // Model selection
+  geminiModel: GeminiModel;
+  openaiModel: OpenAIModel;
 
   // ElevenLabs voices cache
   elevenLabsVoices: ElevenLabsVoice[];

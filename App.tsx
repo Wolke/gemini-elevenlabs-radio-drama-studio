@@ -16,10 +16,12 @@ import {
   listChannels,
   listPlaylists,
   YouTubeChannel,
-  YouTubePlaylist
+  YouTubePlaylist,
+  YouTubeUploadProgress,
+  YouTubeUploadResult
 } from './services/youtubeService';
 import { downloadBlob } from './services/podcastService';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw, Youtube, LogIn, LogOut, Film, Rss } from 'lucide-react';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw, Youtube, LogIn, LogOut, Film, Rss, Upload, ExternalLink, Check } from 'lucide-react';
 
 const GEMINI_VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir",
@@ -111,6 +113,20 @@ export default function App() {
   const [webmBlob, setWebmBlob] = useState<Blob | null>(null);
   const [rssZipBlob, setRssZipBlob] = useState<Blob | null>(null);
   const [coverArtBase64, setCoverArtBase64] = useState<string | null>(null);
+
+  // YouTube upload state
+  const [isUploadingToYouTube, setIsUploadingToYouTube] = useState(false);
+  const [youtubeUploadProgress, setYoutubeUploadProgress] = useState<YouTubeUploadProgress | null>(null);
+  const [youtubeUploadResult, setYoutubeUploadResult] = useState<YouTubeUploadResult | null>(null);
+  const [youtubeUploadError, setYoutubeUploadError] = useState<string | null>(null);
+
+  // Callback to receive upload state from PodcastPublishSection
+  const handleUploadStateChange = (state: { isUploading: boolean; progress: YouTubeUploadProgress | null; result: YouTubeUploadResult | null; error: string | null }) => {
+    setIsUploadingToYouTube(state.isUploading);
+    setYoutubeUploadProgress(state.progress);
+    setYoutubeUploadResult(state.result);
+    setYoutubeUploadError(state.error);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const podcastPublishRef = useRef<PodcastPublishSectionRef>(null);
@@ -1335,6 +1351,7 @@ export default function App() {
               webmBlob={webmBlob} setWebmBlob={setWebmBlob}
               rssZipBlob={rssZipBlob} setRssZipBlob={setRssZipBlob}
               coverArtBase64={coverArtBase64} setCoverArtBase64={setCoverArtBase64}
+              onUploadStateChange={handleUploadStateChange}
               ref={podcastPublishRef}
             />
           </div>
@@ -1417,6 +1434,43 @@ export default function App() {
                   <span className="hidden sm:inline">Cover</span>
                 </button>
               </div>
+
+              {/* YouTube Upload Button */}
+              {isYouTubeLoggedIn && (
+                <>
+                  <div className="h-8 w-px bg-zinc-700 mx-2"></div>
+                  <button
+                    onClick={() => podcastPublishRef.current?.handleUploadToYouTube()}
+                    disabled={!webmBlob || isUploadingToYouTube}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded-lg text-sm font-bold transition-all disabled:cursor-not-allowed"
+                    title="Upload to YouTube"
+                  >
+                    {isUploadingToYouTube ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        {youtubeUploadProgress ? `${youtubeUploadProgress.percentage}%` : 'Uploading...'}
+                      </>
+                    ) : (
+                      <>
+                        <Youtube size={16} />
+                        <span className="hidden sm:inline">Upload</span>
+                      </>
+                    )}
+                  </button>
+                  {youtubeUploadResult && (
+                    <a
+                      href={youtubeUploadResult.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-3 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition-colors"
+                      title="Open uploaded video"
+                    >
+                      <Check size={16} />
+                      <ExternalLink size={14} />
+                    </a>
+                  )}
+                </>
+              )}
 
             </div>
           </div>

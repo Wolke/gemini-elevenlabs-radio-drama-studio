@@ -26,6 +26,7 @@ interface PodcastPublishSectionProps {
     podcastInfo: GeneratedPodcastInfo | null;
     onGenerateAllAudio?: () => Promise<AudioBuffer[]>;
     onGeneratingChange?: (isGenerating: boolean) => void;
+    onUploadStateChange?: (state: { isUploading: boolean; progress: YouTubeUploadProgress | null; result: YouTubeUploadResult | null; error: string | null }) => void;
     // Download state props
     mp3Blob: Blob | null;
     setMp3Blob: (blob: Blob | null) => void;
@@ -44,6 +45,8 @@ interface PodcastPublishSectionProps {
 export interface PodcastPublishSectionRef {
     handleGenerateAll: () => Promise<void>;
     isGenerating: boolean;
+    handleUploadToYouTube: () => Promise<void>;
+    isUploadingToYouTube: boolean;
 }
 
 // Generation step status
@@ -72,7 +75,8 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
     mp3Blob, setMp3Blob,
     webmBlob, setWebmBlob,
     rssZipBlob, setRssZipBlob,
-    coverArtBase64, setCoverArtBase64
+    coverArtBase64, setCoverArtBase64,
+    onUploadStateChange
 }, ref) => {
     // Cover art state
     // removed local coverArtBase64 state
@@ -103,6 +107,16 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
     const [youtubeUploadProgress, setYoutubeUploadProgress] = useState<YouTubeUploadProgress | null>(null);
     const [youtubeUploadResult, setYoutubeUploadResult] = useState<YouTubeUploadResult | null>(null);
     const [youtubeUploadError, setYoutubeUploadError] = useState<string | null>(null);
+
+    // Sync upload state with parent
+    useEffect(() => {
+        onUploadStateChange?.({
+            isUploading: isUploadingToYouTube,
+            progress: youtubeUploadProgress,
+            result: youtubeUploadResult,
+            error: youtubeUploadError
+        });
+    }, [isUploadingToYouTube, youtubeUploadProgress, youtubeUploadResult, youtubeUploadError, onUploadStateChange]);
 
     // Auto-fill from podcastInfo (only episodeTitle, description, coverPrompt - NOT title/author)
     useEffect(() => {
@@ -272,7 +286,9 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
 
     useImperativeHandle(ref, () => ({
         handleGenerateAll,
-        isGenerating
+        isGenerating,
+        handleUploadToYouTube,
+        isUploadingToYouTube
     }));
 
     // Regenerate Cover Art
@@ -645,89 +661,7 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
 
             {/* Download Buttons Section REMOVED */}
 
-            {/* YouTube Upload Section */}
-            {
-                isYouTubeLoggedIn && (
-                    <div className="bg-gradient-to-br from-red-900/20 to-red-800/10 border border-red-500/30 rounded-lg p-4 space-y-3">
-                        <div className="flex items-center gap-2">
-                            <Youtube size={20} className="text-red-500" />
-                            <span className="font-semibold text-red-300">Upload to YouTube</span>
-                            {selectedPlaylistId && youtubePlaylists.find(p => p.id === selectedPlaylistId) && (
-                                <span className="text-xs text-zinc-400">
-                                    → {youtubePlaylists.find(p => p.id === selectedPlaylistId)?.title}
-                                </span>
-                            )}
-                        </div>
-
-                        <button
-                            onClick={handleUploadToYouTube}
-                            disabled={!webmBlob || isUploadingToYouTube}
-                            className="w-full flex items-center justify-center gap-2 py-3 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded-lg font-medium transition-colors disabled:cursor-not-allowed"
-                        >
-                            {isUploadingToYouTube ? (
-                                <>
-                                    <Loader2 size={18} className="animate-spin" />
-                                    Uploading...
-                                    {youtubeUploadProgress && (
-                                        <span className="ml-2">
-                                            {youtubeUploadProgress.percentage}%
-                                        </span>
-                                    )}
-                                </>
-                            ) : (
-                                <>
-                                    <Upload size={18} />
-                                    Upload to YouTube
-                                </>
-                            )}
-                        </button>
-
-                        {youtubeUploadProgress && (
-                            <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
-                                <div
-                                    className="bg-red-500 h-full transition-all duration-300"
-                                    style={{ width: `${youtubeUploadProgress.percentage}%` }}
-                                />
-                            </div>
-                        )}
-
-                        {youtubeUploadResult && (
-                            <div className="flex items-center justify-between bg-green-900/30 border border-green-500/30 rounded-lg p-3">
-                                <div className="flex items-center gap-2">
-                                    <Check size={16} className="text-green-400" />
-                                    <span className="text-sm text-green-300">Upload successful!</span>
-                                </div>
-                                <a
-                                    href={youtubeUploadResult.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-sm transition-colors"
-                                >
-                                    <ExternalLink size={14} />
-                                    Open Video
-                                </a>
-                            </div>
-                        )}
-
-                        {youtubeUploadError && (
-                            <div className="flex items-center gap-2 bg-red-900/30 border border-red-500/30 rounded-lg p-3">
-                                <AlertCircle size={16} className="text-red-400" />
-                                <span className="text-sm text-red-300">{youtubeUploadError}</span>
-                            </div>
-                        )}
-
-                        {!webmBlob && (
-                            <p className="text-xs text-zinc-500 text-center">
-                                Please generate WebM video first before uploading
-                            </p>
-                        )}
-
-                        <p className="text-xs text-zinc-500">
-                            Video will be uploaded as "Private". You can change privacy settings in YouTube Studio
-                        </p>
-                    </div>
-                )
-            }
+            {/* YouTube Upload Section MOVED TO FOOTER */}
 
             {/* Platform Info */}
             <div className="bg-black/20 rounded-lg p-3 border border-zinc-800">

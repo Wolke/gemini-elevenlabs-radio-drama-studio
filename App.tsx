@@ -8,7 +8,17 @@ import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, buff
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
 import { PodcastPublishSection } from './components/PodcastPublishSection';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw } from 'lucide-react';
+import {
+  initiateYouTubeAuth,
+  isYouTubeAuthenticated,
+  clearYouTubeAuth,
+  getYouTubeAccessToken,
+  listChannels,
+  listPlaylists,
+  YouTubeChannel,
+  YouTubePlaylist
+} from './services/youtubeService';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw, Youtube, LogIn, LogOut } from 'lucide-react';
 
 const GEMINI_VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir",
@@ -34,6 +44,7 @@ export default function App() {
     const savedTtsProvider = (localStorage.getItem('ttsProvider') as TtsProvider) || 'gemini';
     const savedGeminiModel = (localStorage.getItem('geminiModel') as GeminiModel) || 'gemini-2.5-flash';
     const savedOpenaiModel = (localStorage.getItem('openaiModel') as OpenAIModel) || 'gpt-4o';
+    const savedYoutubeClientId = localStorage.getItem('youtubeClientId') || '';
     return {
       storyText: '',
       cast: [],
@@ -71,11 +82,27 @@ export default function App() {
     return localStorage.getItem('saveOpenaiKey') === 'true';
   });
 
+  // YouTube Client ID state
+  const [youtubeClientId, setYoutubeClientId] = useState(() => {
+    return localStorage.getItem('youtubeClientId') || '';
+  });
+  const [saveYoutubeClientId, setSaveYoutubeClientId] = useState(() => {
+    return localStorage.getItem('saveYoutubeClientId') === 'true';
+  });
+
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isProjectLoading, setIsProjectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // YouTube state (moved from PodcastPublishSection to Config)
+  const [isYouTubeLoggedIn, setIsYouTubeLoggedIn] = useState(false);
+  const [youtubeChannels, setYoutubeChannels] = useState<YouTubeChannel[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>('');
+  const [youtubePlaylists, setYoutubePlaylists] = useState<YouTubePlaylist[]>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
+  const [isLoadingYouTube, setIsLoadingYouTube] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -111,6 +138,17 @@ export default function App() {
     }
   }, [saveOpenaiKey, state.openaiApiKey]);
 
+  // Save/clear YouTube Client ID
+  React.useEffect(() => {
+    if (saveYoutubeClientId && youtubeClientId) {
+      localStorage.setItem('saveYoutubeClientId', 'true');
+      localStorage.setItem('youtubeClientId', youtubeClientId);
+    } else {
+      localStorage.removeItem('saveYoutubeClientId');
+      localStorage.removeItem('youtubeClientId');
+    }
+  }, [saveYoutubeClientId, youtubeClientId]);
+
   // Save provider and model selections
   React.useEffect(() => {
     localStorage.setItem('llmProvider', state.llmProvider);
@@ -118,6 +156,74 @@ export default function App() {
     localStorage.setItem('geminiModel', state.geminiModel);
     localStorage.setItem('openaiModel', state.openaiModel);
   }, [state.llmProvider, state.ttsProvider, state.geminiModel, state.openaiModel]);
+
+  // Check YouTube auth status on mount
+  useEffect(() => {
+    setIsYouTubeLoggedIn(isYouTubeAuthenticated());
+  }, []);
+
+  // Handle YouTube Login
+  const handleYouTubeLogin = async () => {
+    if (!youtubeClientId) {
+      alert('請先設定 YouTube OAuth Client ID');
+      return;
+    }
+    setIsLoadingYouTube(true);
+    try {
+      const token = await initiateYouTubeAuth(youtubeClientId);
+      setIsYouTubeLoggedIn(true);
+
+      // Fetch channels
+      const channels = await listChannels(token);
+      setYoutubeChannels(channels);
+
+      // Auto-select first channel if available
+      if (channels.length > 0) {
+        setSelectedChannelId(channels[0].id);
+      }
+    } catch (e: any) {
+      console.error('YouTube login error:', e);
+      alert('YouTube 登入失敗: ' + e.message);
+    } finally {
+      setIsLoadingYouTube(false);
+    }
+  };
+
+  // Handle YouTube Logout
+  const handleYouTubeLogout = () => {
+    clearYouTubeAuth();
+    setIsYouTubeLoggedIn(false);
+    setYoutubeChannels([]);
+    setSelectedChannelId('');
+    setYoutubePlaylists([]);
+    setSelectedPlaylistId('');
+  };
+
+  // Load playlists when channel changes
+  useEffect(() => {
+    if (!selectedChannelId || !isYouTubeLoggedIn) {
+      setYoutubePlaylists([]);
+      return;
+    }
+
+    const loadPlaylists = async () => {
+      const token = getYouTubeAccessToken();
+      if (!token) return;
+
+      setIsLoadingYouTube(true);
+      try {
+        const playlists = await listPlaylists(token, selectedChannelId);
+        setYoutubePlaylists(playlists);
+        setSelectedPlaylistId(''); // Reset selection
+      } catch (e) {
+        console.error('Failed to load playlists:', e);
+      } finally {
+        setIsLoadingYouTube(false);
+      }
+    };
+
+    loadPlaylists();
+  }, [selectedChannelId, isYouTubeLoggedIn]);
 
   // Fetch ElevenLabs voices when API key changes
   const handleFetchVoices = async () => {
@@ -791,6 +897,153 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {/* YouTube OAuth Client ID */}
+              <div className="p-3 bg-red-500/5 rounded-lg border border-red-500/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-500/10 text-red-400 rounded-md">
+                      <Youtube size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-red-300">YouTube Music Podcast</p>
+                      <p className="text-xs text-zinc-500">直接上傳到 YouTube</p>
+                    </div>
+                  </div>
+                  {isYouTubeLoggedIn ? (
+                    <button
+                      onClick={handleYouTubeLogout}
+                      className="flex items-center gap-1 px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
+                    >
+                      <LogOut size={12} />
+                      登出
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleYouTubeLogin}
+                      disabled={!youtubeClientId || isLoadingYouTube}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded text-xs transition-colors disabled:cursor-not-allowed"
+                    >
+                      {isLoadingYouTube ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />}
+                      登入 YouTube
+                    </button>
+                  )}
+                </div>
+
+                {/* Client ID Input */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Enter your Google OAuth Client ID..."
+                    value={youtubeClientId}
+                    onChange={(e) => setYoutubeClientId(e.target.value)}
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-red-500"
+                  />
+                  {youtubeClientId && (
+                    <button
+                      onClick={() => setSaveYoutubeClientId(!saveYoutubeClientId)}
+                      className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveYoutubeClientId ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                      title={saveYoutubeClientId ? 'Saved locally' : 'Click to save locally'}
+                    >
+                      <Save size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Channel & Playlist Selection (shown when logged in) */}
+                {isYouTubeLoggedIn && (
+                  <div className="space-y-2 pt-2 border-t border-red-500/20">
+                    {/* Channel Selector */}
+                    <div className="space-y-1">
+                      <label className="text-xs text-zinc-400 font-medium">選擇頻道</label>
+                      <select
+                        value={selectedChannelId}
+                        onChange={(e) => setSelectedChannelId(e.target.value)}
+                        disabled={isLoadingYouTube}
+                        className="w-full bg-zinc-950 border border-red-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-red-500"
+                      >
+                        <option value="">選擇頻道...</option>
+                        {youtubeChannels.map(channel => (
+                          <option key={channel.id} value={channel.id}>
+                            {channel.title}
+                          </option>
+                        ))}
+                        <option value="__manual__">📝 手動輸入頻道 ID...</option>
+                      </select>
+                      {/* Manual Channel ID Input */}
+                      {selectedChannelId === '__manual__' && (
+                        <div className="flex gap-1">
+                          <input
+                            type="text"
+                            placeholder="輸入頻道 ID（例如：UCxxxxxxxxxx）"
+                            className="flex-1 bg-zinc-950 border border-red-500/30 rounded px-2 py-1 text-xs focus:outline-none focus:border-red-500"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const input = e.target as HTMLInputElement;
+                                if (input.value.trim()) {
+                                  setSelectedChannelId(input.value.trim());
+                                }
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={(e) => {
+                              const input = (e.target as HTMLElement).previousElementSibling as HTMLInputElement;
+                              if (input?.value.trim()) {
+                                setSelectedChannelId(input.value.trim());
+                              }
+                            }}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-xs"
+                          >
+                            確認
+                          </button>
+                        </div>
+                      )}
+                      <p className="text-[10px] text-zinc-600">
+                        品牌帳戶的頻道可在 YouTube Studio → 設定 → 頻道 → 頻道網址 中找到 ID
+                      </p>
+                    </div>
+
+                    {/* Playlist Selector */}
+                    {selectedChannelId && selectedChannelId !== '__manual__' && (
+                      <div className="space-y-1">
+                        <label className="text-xs text-zinc-400 font-medium">上傳到播放清單 (Podcast)</label>
+                        <select
+                          value={selectedPlaylistId}
+                          onChange={(e) => setSelectedPlaylistId(e.target.value)}
+                          disabled={isLoadingYouTube}
+                          className="w-full bg-zinc-950 border border-red-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-red-500"
+                        >
+                          <option value="">不加入播放清單</option>
+                          {youtubePlaylists.map(playlist => (
+                            <option key={playlist.id} value={playlist.id}>
+                              {playlist.title} ({playlist.itemCount} 個影片)
+                            </option>
+                          ))}
+                        </select>
+                        {isLoadingYouTube && (
+                          <div className="flex items-center gap-2 text-xs text-zinc-500">
+                            <Loader2 size={12} className="animate-spin" />
+                            載入中...
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {youtubeChannels.length > 0 && (
+                      <p className="text-[10px] text-green-500">
+                        ✓ 已連接 {youtubeChannels.length} 個頻道
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!isYouTubeLoggedIn && (
+                  <p className="text-[10px] text-zinc-600">
+                    從 Google Cloud Console 取得 OAuth 2.0 Client ID（Web 應用程式類型）
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1030,6 +1283,10 @@ export default function App() {
               openaiApiKey={state.openaiApiKey}
               podcastInfo={state.podcastInfo}
               onGenerateAllAudio={handleGenerateAllAudio}
+              // YouTube props from Config
+              isYouTubeLoggedIn={isYouTubeLoggedIn}
+              selectedPlaylistId={selectedPlaylistId}
+              youtubePlaylists={youtubePlaylists}
             />
           </div>
         )

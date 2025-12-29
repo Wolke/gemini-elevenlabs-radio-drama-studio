@@ -4,11 +4,19 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save, RefreshCw } from 'lucide-react';
+import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save, RefreshCw, Upload, Youtube, ExternalLink } from 'lucide-react';
 import { generatePodcastCoverArt, createPodcastZip, downloadBlob, PodcastMetadata, EpisodeMetadata } from '../services/podcastService';
 import { generateOpenAICoverArt } from '../services/openaiService';
 import { bufferToWav, bufferToMp3, createWebmVideo, mergeAudioBuffers } from '../utils/audioUtils';
 import { GeneratedPodcastInfo, ImageProvider } from '../types';
+import {
+    uploadToYouTube,
+    getYouTubeAccessToken,
+    addVideoToPlaylist,
+    YouTubeUploadProgress,
+    YouTubeUploadResult,
+    YouTubePlaylist
+} from '../services/youtubeService';
 
 interface PodcastPublishSectionProps {
     storyText: string;
@@ -17,6 +25,10 @@ interface PodcastPublishSectionProps {
     openaiApiKey: string;
     podcastInfo: GeneratedPodcastInfo | null;
     onGenerateAllAudio?: () => Promise<AudioBuffer[]>;
+    // YouTube props from Config
+    isYouTubeLoggedIn: boolean;
+    selectedPlaylistId: string;
+    youtubePlaylists: YouTubePlaylist[];
 }
 
 // Generation step status
@@ -35,7 +47,11 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     geminiApiKey,
     openaiApiKey,
     podcastInfo,
-    onGenerateAllAudio
+    onGenerateAllAudio,
+    // YouTube props from Config
+    isYouTubeLoggedIn,
+    selectedPlaylistId,
+    youtubePlaylists
 }) => {
     // Cover art state
     const [coverArtBase64, setCoverArtBase64] = useState<string | null>(null);
@@ -53,6 +69,12 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     const [mp3Blob, setMp3Blob] = useState<Blob | null>(null);
     const [webmBlob, setWebmBlob] = useState<Blob | null>(null);
     const [rssZipBlob, setRssZipBlob] = useState<Blob | null>(null);
+
+    // YouTube upload state (only upload-related, login/channel/playlist comes from props)
+    const [isUploadingToYouTube, setIsUploadingToYouTube] = useState(false);
+    const [youtubeUploadProgress, setYoutubeUploadProgress] = useState<YouTubeUploadProgress | null>(null);
+    const [youtubeUploadResult, setYoutubeUploadResult] = useState<YouTubeUploadResult | null>(null);
+    const [youtubeUploadError, setYoutubeUploadError] = useState<string | null>(null);
 
     // Generation state
     const [isGenerating, setIsGenerating] = useState(false);
@@ -323,6 +345,63 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
         }
     };
 
+    // === YouTube Upload ===
+    // Note: Login/channel/playlist selection is now handled in App.tsx Config
+
+    // Handle Upload to YouTube
+    const handleUploadToYouTube = async () => {
+        if (!webmBlob) {
+            alert('請先生成 WebM 影片');
+            return;
+        }
+
+        const token = getYouTubeAccessToken();
+        if (!token) {
+            alert('請先登入 YouTube');
+            return;
+        }
+
+        setIsUploadingToYouTube(true);
+        setYoutubeUploadProgress(null);
+        setYoutubeUploadResult(null);
+        setYoutubeUploadError(null);
+
+        try {
+            const result = await uploadToYouTube(
+                webmBlob,
+                {
+                    title: episodeTitle || `${podcastTitle} - 新集數`,
+                    description: `${podcastDescription || storyText.slice(0, 500)}\n\n${podcastInfo?.tags?.map(t => `#${t}`).join(' ') || ''}`,
+                    tags: podcastInfo?.tags || [podcastTitle],
+                    categoryId: '22', // People & Blogs (good for podcasts)
+                    privacyStatus: 'private', // Start as private for safety
+                    madeForKids: false,
+                },
+                token,
+                (progress) => setYoutubeUploadProgress(progress)
+            );
+
+            // Add to playlist if selected
+            if (selectedPlaylistId && result.videoId) {
+                try {
+                    await addVideoToPlaylist(result.videoId, selectedPlaylistId, token);
+                    const playlist = youtubePlaylists.find(p => p.id === selectedPlaylistId);
+                    console.log(`Video added to playlist: ${playlist?.title}`);
+                } catch (e) {
+                    console.warn('Could not add video to playlist:', e);
+                }
+            }
+
+            setYoutubeUploadResult(result);
+        } catch (e: any) {
+            console.error('YouTube upload error:', e);
+            setYoutubeUploadError(e.message);
+        } finally {
+            setIsUploadingToYouTube(false);
+            setYoutubeUploadProgress(null);
+        }
+    };
+
     // Step icon component
     const StepIcon = ({ status }: { status: StepStatus }) => {
         switch (status) {
@@ -586,6 +665,88 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                             <span className="text-xs text-zinc-300">封面圖</span>
                         </button>
                     </div>
+                </div>
+            )}
+
+            {/* YouTube Upload Section */}
+            {isYouTubeLoggedIn && (
+                <div className="bg-gradient-to-br from-red-900/20 to-red-800/10 border border-red-500/30 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Youtube size={20} className="text-red-500" />
+                        <span className="font-semibold text-red-300">上傳到 YouTube</span>
+                        {selectedPlaylistId && youtubePlaylists.find(p => p.id === selectedPlaylistId) && (
+                            <span className="text-xs text-zinc-400">
+                                → {youtubePlaylists.find(p => p.id === selectedPlaylistId)?.title}
+                            </span>
+                        )}
+                    </div>
+
+                    <button
+                        onClick={handleUploadToYouTube}
+                        disabled={!webmBlob || isUploadingToYouTube}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded-lg font-medium transition-colors disabled:cursor-not-allowed"
+                    >
+                        {isUploadingToYouTube ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin" />
+                                上傳中...
+                                {youtubeUploadProgress && (
+                                    <span className="ml-2">
+                                        {youtubeUploadProgress.percentage}%
+                                    </span>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Upload size={18} />
+                                上傳到 YouTube
+                            </>
+                        )}
+                    </button>
+
+                    {youtubeUploadProgress && (
+                        <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
+                            <div
+                                className="bg-red-500 h-full transition-all duration-300"
+                                style={{ width: `${youtubeUploadProgress.percentage}%` }}
+                            />
+                        </div>
+                    )}
+
+                    {youtubeUploadResult && (
+                        <div className="flex items-center justify-between bg-green-900/30 border border-green-500/30 rounded-lg p-3">
+                            <div className="flex items-center gap-2">
+                                <Check size={16} className="text-green-400" />
+                                <span className="text-sm text-green-300">上傳成功！</span>
+                            </div>
+                            <a
+                                href={youtubeUploadResult.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-sm transition-colors"
+                            >
+                                <ExternalLink size={14} />
+                                開啟影片
+                            </a>
+                        </div>
+                    )}
+
+                    {youtubeUploadError && (
+                        <div className="flex items-center gap-2 bg-red-900/30 border border-red-500/30 rounded-lg p-3">
+                            <AlertCircle size={16} className="text-red-400" />
+                            <span className="text-sm text-red-300">{youtubeUploadError}</span>
+                        </div>
+                    )}
+
+                    {!webmBlob && (
+                        <p className="text-xs text-zinc-500 text-center">
+                            請先生成 WebM 影片才能上傳
+                        </p>
+                    )}
+
+                    <p className="text-xs text-zinc-500">
+                        影片將以「私人」模式上傳，您可在 YouTube Studio 中修改隱私設定
+                    </p>
                 </div>
             )}
 

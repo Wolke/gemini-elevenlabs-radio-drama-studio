@@ -6,9 +6,8 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save, RefreshCw, Upload, Youtube, ExternalLink } from 'lucide-react';
 import { generatePodcastCoverArt, createPodcastZip, downloadBlob, PodcastMetadata, EpisodeMetadata } from '../services/podcastService';
-import { generateOpenAICoverArt } from '../services/openaiService';
 import { bufferToWav, bufferToMp3, createWebmVideo, mergeAudioBuffers } from '../utils/audioUtils';
-import { GeneratedPodcastInfo, ImageProvider } from '../types';
+import { GeneratedPodcastInfo } from '../types';
 import {
     uploadToYouTube,
     getYouTubeAccessToken,
@@ -22,7 +21,6 @@ interface PodcastPublishSectionProps {
     storyText: string;
     items: { audioBuffer?: AudioBuffer | null }[];
     geminiApiKey: string;
-    openaiApiKey: string;
     podcastInfo: GeneratedPodcastInfo | null;
     onGenerateAllAudio?: () => Promise<AudioBuffer[]>;
     onGeneratingChange?: (isGenerating: boolean) => void;
@@ -63,7 +61,6 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
     storyText,
     items,
     geminiApiKey,
-    openaiApiKey,
     podcastInfo,
     onGenerateAllAudio,
     // YouTube props from Config
@@ -79,8 +76,6 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
     onUploadStateChange
 }, ref) => {
     // Cover art state
-    // removed local coverArtBase64 state
-    const [imageProvider, setImageProvider] = useState<ImageProvider>('gemini');
 
     // Generation state
     const [isGenerating, setIsGenerating] = useState(false);
@@ -141,8 +136,6 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
     const allAudioGenerated = items.every(item => item.audioBuffer);
     const totalDuration = items.reduce((acc, item) => acc + (item.audioBuffer?.duration || 0), 0);
     const hasGeminiKey = !!geminiApiKey;
-    const hasOpenaiKey = !!openaiApiKey;
-    const hasAnyImageKey = hasGeminiKey || hasOpenaiKey;
 
     // Update step status helper
     const updateStep = (id: string, status: StepStatus, error?: string) => {
@@ -196,19 +189,12 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
 
             // Step 2: Generate cover art if not done
             let cover = coverArtBase64;
-            if (!cover && hasAnyImageKey) {
+            if (!cover && hasGeminiKey) {
                 updateStep('cover', 'running');
                 try {
                     const prompt = coverPrompt || `Based on this story: "${storyText.slice(0, 500)}..."`;
-                    if (imageProvider === 'openai' && hasOpenaiKey) {
-                        const rawCover = await generateOpenAICoverArt(prompt, openaiApiKey);
-                        // Compress for iTunes compatibility (<500KB)
-                        const { compressImageForPodcast } = await import('../services/podcastService');
-                        cover = await compressImageForPodcast(rawCover);
-                    } else if (hasGeminiKey) {
-                        // Gemini already compresses in generatePodcastCoverArt
-                        cover = await generatePodcastCoverArt(prompt, podcastTitle, geminiApiKey);
-                    }
+                    // Gemini already compresses in generatePodcastCoverArt
+                    cover = await generatePodcastCoverArt(prompt, podcastTitle, geminiApiKey);
                     setCoverArtBase64(cover);
                     updateStep('cover', 'done');
                 } catch (e: any) {
@@ -298,28 +284,15 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
             alert('Story content or prompt required to generate cover');
             return;
         }
-        if (!hasAnyImageKey) {
-            alert('Gemini or OpenAI API Key required');
+        if (!hasGeminiKey) {
+            alert('Gemini API Key required');
             return;
         }
 
         setIsRegeneratingCover(true);
         try {
             const prompt = coverPrompt || `Based on this story: "${storyText.slice(0, 500)}..."`;
-            let cover;
-
-            if (imageProvider === 'openai' && hasOpenaiKey) {
-                const rawCover = await generateOpenAICoverArt(prompt, openaiApiKey);
-                // Compress for iTunes compatibility (<500KB)
-                const { compressImageForPodcast } = await import('../services/podcastService');
-                cover = await compressImageForPodcast(rawCover);
-            } else if (hasGeminiKey) {
-                // Gemini already compresses in generatePodcastCoverArt
-                cover = await generatePodcastCoverArt(prompt, podcastTitle, geminiApiKey);
-            } else {
-                throw new Error('No valid API key for selected provider');
-            }
-
+            const cover = await generatePodcastCoverArt(prompt, podcastTitle, geminiApiKey);
             setCoverArtBase64(cover);
         } catch (e: any) {
             console.error('Cover regeneration error:', e);
@@ -542,18 +515,10 @@ export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, Podcas
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art Generator</label>
                     <div className="flex gap-1 bg-black/40 border border-zinc-700 rounded-lg p-1">
                         <button
-                            onClick={() => setImageProvider('gemini')}
                             disabled={!hasGeminiKey}
-                            className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${imageProvider === 'gemini' && hasGeminiKey ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} ${!hasGeminiKey ? 'opacity-30 cursor-not-allowed' : ''}`}
+                            className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${hasGeminiKey ? 'bg-emerald-600 text-white' : 'opacity-30 cursor-not-allowed text-zinc-500'}`}
                         >
                             Gemini
-                        </button>
-                        <button
-                            onClick={() => setImageProvider('openai')}
-                            disabled={!hasOpenaiKey}
-                            className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${imageProvider === 'openai' && hasOpenaiKey ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} ${!hasOpenaiKey ? 'opacity-30 cursor-not-allowed' : ''}`}
-                        >
-                            DALL-E
                         </button>
                     </div>
                 </div>

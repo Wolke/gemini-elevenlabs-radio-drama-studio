@@ -1,6 +1,6 @@
 /**
  * Shared prompt templates for script generation
- * Used by both Gemini and OpenAI services
+ * Used by Gemini service
  */
 
 import { ElevenLabsVoice } from '../types';
@@ -114,24 +114,6 @@ export const buildCastInstructions = (
 };
 
 /**
- * Build script instructions for OpenAI (needs explicit type field)
- */
-export const buildScriptInstructionsOpenAI = (sfxInstructions: string): string => {
-  return `3. **Script**: A list of cues. Each cue MUST have a 'type' field with value either 'speech' or 'sfx'.
-   - 'type': REQUIRED - Either 'speech' (for dialogue) or 'sfx' (for sound effects).
-   - 'location': The name of the scene where this cue takes place (MUST match a name from the Scenes list).
-   - For type 'speech':
-     - 'character': Name from the cast list.
-     - 'text': The dialogue (IN THE STORY'S LANGUAGE).
-     - 'expression': A direction for HOW it should be spoken (IN ENGLISH).
-   ${sfxInstructions}
-
-Return a JSON object with keys "cast", "scenes", and "script". Example script item format:
-- Speech: {"type": "speech", "location": "Living Room", "character": "Alice", "text": "Hello!", "expression": "cheerful"}
-- SFX: {"type": "sfx", "location": "Forest", "sfxDescription": "Birds chirping"}`;
-};
-
-/**
  * Build script instructions for Gemini (schema enforces type)
  */
 export const buildScriptInstructionsGemini = (sfxInstructions: string): string => {
@@ -145,6 +127,8 @@ export const buildScriptInstructionsGemini = (sfxInstructions: string): string =
 
 Return a JSON object with keys "cast", "scenes", "script", and "podcastInfo".`;
 };
+
+
 
 /**
  * Get Podcast metadata generation instructions

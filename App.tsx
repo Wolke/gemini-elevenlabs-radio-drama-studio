@@ -1,8 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType, LlmProvider, TtsProvider, GeminiModel, OpenAIModel, GEMINI_MODELS, OPENAI_MODELS } from './types';
+import { DramaState, ItemType, ScriptItem, CastMember, ElevenLabsVoice, VoiceType, TtsProvider, GeminiModel, GEMINI_MODELS } from './types';
 import { generateScriptFromStory, generateSpeech } from './services/geminiService';
-import { generateScriptFromStoryOpenAI, generateOpenAISpeech, OPENAI_VOICES } from './services/openaiService';
 import { generateElevenLabsSfx, generateElevenLabsSpeech, fetchElevenLabsVoices } from './services/elevenLabsService';
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
@@ -42,11 +41,8 @@ export default function App() {
     // Load API keys from localStorage if saved
     const savedGeminiKey = localStorage.getItem('geminiApiKey') || '';
     const savedElevenLabsKey = localStorage.getItem('elevenLabsApiKey') || '';
-    const savedOpenaiKey = localStorage.getItem('openaiApiKey') || '';
-    const savedLlmProvider = (localStorage.getItem('llmProvider') as LlmProvider) || 'gemini';
     const savedTtsProvider = (localStorage.getItem('ttsProvider') as TtsProvider) || 'gemini';
     const savedGeminiModel = (localStorage.getItem('geminiModel') as GeminiModel) || 'gemini-2.5-flash';
-    const savedOpenaiModel = (localStorage.getItem('openaiModel') as OpenAIModel) || 'gpt-4o';
     const savedYoutubeClientId = localStorage.getItem('youtubeClientId') || '';
     return {
       storyText: '',
@@ -63,13 +59,9 @@ export default function App() {
       useElevenLabsForSpeech: true,
       elevenLabsVoices: [],
       isLoadingVoices: false,
-      // OpenAI settings
-      openaiApiKey: savedOpenaiKey,
-      llmProvider: savedLlmProvider,
       ttsProvider: savedTtsProvider,
       // Model selection
       geminiModel: savedGeminiModel,
-      openaiModel: savedOpenaiModel,
       // Podcast info
       podcastInfo: null,
     };
@@ -80,9 +72,6 @@ export default function App() {
   });
   const [saveElevenLabsKey, setSaveElevenLabsKey] = useState(() => {
     return localStorage.getItem('saveElevenLabsKey') === 'true';
-  });
-  const [saveOpenaiKey, setSaveOpenaiKey] = useState(() => {
-    return localStorage.getItem('saveOpenaiKey') === 'true';
   });
 
   // YouTube Client ID state
@@ -152,35 +141,11 @@ export default function App() {
     }
   }, [saveElevenLabsKey, state.elevenLabsApiKey]);
 
-  // Save OpenAI API key
-  React.useEffect(() => {
-    if (saveOpenaiKey && state.openaiApiKey) {
-      localStorage.setItem('saveOpenaiKey', 'true');
-      localStorage.setItem('openaiApiKey', state.openaiApiKey);
-    } else {
-      localStorage.removeItem('saveOpenaiKey');
-      localStorage.removeItem('openaiApiKey');
-    }
-  }, [saveOpenaiKey, state.openaiApiKey]);
-
-  // Save/clear YouTube Client ID
-  React.useEffect(() => {
-    if (saveYoutubeClientId && youtubeClientId) {
-      localStorage.setItem('saveYoutubeClientId', 'true');
-      localStorage.setItem('youtubeClientId', youtubeClientId);
-    } else {
-      localStorage.removeItem('saveYoutubeClientId');
-      localStorage.removeItem('youtubeClientId');
-    }
-  }, [saveYoutubeClientId, youtubeClientId]);
-
   // Save provider and model selections
   React.useEffect(() => {
-    localStorage.setItem('llmProvider', state.llmProvider);
     localStorage.setItem('ttsProvider', state.ttsProvider);
     localStorage.setItem('geminiModel', state.geminiModel);
-    localStorage.setItem('openaiModel', state.openaiModel);
-  }, [state.llmProvider, state.ttsProvider, state.geminiModel, state.openaiModel]);
+  }, [state.ttsProvider, state.geminiModel]);
 
   // Check YouTube auth status on mount
   useEffect(() => {
@@ -267,10 +232,9 @@ export default function App() {
   const handleGenerateScript = async () => {
     if (!state.storyText.trim()) return;
 
-    // Check required API key based on provider
-    const requiredApiKey = state.llmProvider === 'openai' ? state.openaiApiKey : state.geminiApiKey;
-    if (!requiredApiKey) {
-      setError(`Please enter ${state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API key first.`);
+    // Check required API key
+    if (!state.geminiApiKey) {
+      setError('Please enter Gemini API key first.');
       return;
     }
 
@@ -290,35 +254,15 @@ export default function App() {
       // Only enable SFX if the setting is on AND we have an ElevenLabs API key to generate them
       const shouldIncludeSfx = state.enableSfx && !!state.elevenLabsApiKey;
 
-      let cast, scenes, items, podcastInfo;
-
-      if (state.llmProvider === 'openai') {
-        const result = await generateScriptFromStoryOpenAI(
-          state.storyText,
-          shouldIncludeSfx,
-          state.includeNarrator,
-          state.elevenLabsVoices,
-          state.openaiApiKey,
-          state.openaiModel
-        );
-        cast = result.cast;
-        scenes = result.scenes;
-        items = result.items;
-        podcastInfo = result.podcastInfo;
-      } else {
-        const result = await generateScriptFromStory(
-          state.storyText,
-          shouldIncludeSfx,
-          state.includeNarrator,
-          state.elevenLabsVoices,
-          state.geminiApiKey,
-          state.geminiModel
-        );
-        cast = result.cast;
-        scenes = result.scenes;
-        items = result.items;
-        podcastInfo = result.podcastInfo;
-      }
+      const result = await generateScriptFromStory(
+        state.storyText,
+        shouldIncludeSfx,
+        state.includeNarrator,
+        state.elevenLabsVoices,
+        state.geminiApiKey,
+        state.geminiModel
+      );
+      const { cast, scenes, items, podcastInfo } = result;
 
       // Set voiceType based on ttsProvider and whether AI assigned an ElevenLabs voice
       const finalCast = cast.map(member => {
@@ -332,12 +276,6 @@ export default function App() {
               voice: elVoice.name,
             };
           }
-        }
-        // Use the selected TTS provider's voice type
-        if (state.ttsProvider === 'openai') {
-          // Default to a suitable OpenAI voice
-          const openaiVoice = OPENAI_VOICES.includes(member.voice as any) ? member.voice : 'alloy';
-          return { ...member, voiceType: 'openai' as const, voice: openaiVoice };
         }
         // Default to Gemini voice
         return { ...member, voiceType: 'gemini' as const };
@@ -401,17 +339,9 @@ export default function App() {
       const item = state.items.find(i => i.id === id);
       const castMember = item?.character ? state.cast.find(c => c.name === item.character) : undefined;
 
-      if (castMember?.voiceType === 'openai' && state.openaiApiKey) {
-        // Use OpenAI TTS
-        const base64 = await generateOpenAISpeech(text, voice, castMember.voicePrompt || '', state.openaiApiKey);
-        buffer = await decodeAudioFile(base64, ctx);
-      } else if (castMember?.voiceType === 'elevenlabs' && state.elevenLabsApiKey) {
+      if (castMember?.voiceType === 'elevenlabs' && state.elevenLabsApiKey) {
         // Use ElevenLabs with specific voice ID + voicePrompt
         const base64 = await generateElevenLabsSpeech(text, castMember.elevenLabsVoiceId, voice, castMember.voicePrompt, state.elevenLabsApiKey);
-        buffer = await decodeAudioFile(base64, ctx);
-      } else if (state.ttsProvider === 'openai' && state.openaiApiKey) {
-        // Fallback to OpenAI TTS based on provider setting
-        const base64 = await generateOpenAISpeech(text, voice, castMember?.voicePrompt || '', state.openaiApiKey);
         buffer = await decodeAudioFile(base64, ctx);
       } else if (state.useElevenLabsForSpeech && state.elevenLabsApiKey) {
         // Use ElevenLabs with mapped Gemini voice + voicePrompt
@@ -687,13 +617,13 @@ export default function App() {
           />
           <button
             onClick={handleGenerateScript}
-            disabled={state.isGeneratingScript || !state.storyText.trim() || (state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey)}
+            disabled={state.isGeneratingScript || !state.storyText.trim() || !state.geminiApiKey}
             className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {state.isGeneratingScript ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
-            Generate Script & Cast ({state.llmProvider === 'openai' ? state.openaiModel : state.geminiModel})
+            Generate Script & Cast ({state.geminiModel})
           </button>
-          {(state.llmProvider === 'gemini' ? !state.geminiApiKey : !state.openaiApiKey) && <p className="text-amber-400 text-xs text-center">⚠ Enter {state.llmProvider === 'openai' ? 'OpenAI' : 'Gemini'} API Key first</p>}
+          {!state.geminiApiKey && <p className="text-amber-400 text-xs text-center">⚠ Enter Gemini API Key first</p>}
           {error && <p className="text-red-400 text-xs text-center">{error}</p>}
         </div>
       </section>
@@ -749,55 +679,29 @@ export default function App() {
                 )}
               </div>
 
-              {/* LLM Provider Selection */}
+              {/* LLM Model Selection */}
               <div className="p-3 bg-purple-500/5 rounded-lg border border-purple-500/20 space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-purple-500/10 text-purple-400 rounded-md">
                     <Wand2 size={18} />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-purple-300">Script Generation (LLM)</p>
-                    <p className="text-xs text-zinc-500">Choose AI for script generation</p>
+                    <p className="text-sm font-medium text-purple-300">Script Generation (Gemini)</p>
+                    <p className="text-xs text-zinc-500">Select model for script generation</p>
                   </div>
-                </div>
-                <div className="flex gap-1 bg-zinc-950 rounded p-1">
-                  <button
-                    onClick={() => setState(prev => ({ ...prev, llmProvider: 'gemini' }))}
-                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    Gemini
-                  </button>
-                  <button
-                    onClick={() => setState(prev => ({ ...prev, llmProvider: 'openai' }))}
-                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.llmProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    OpenAI
-                  </button>
                 </div>
                 {/* Model Selection Dropdown */}
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-zinc-400 font-medium min-w-[50px]">Model:</label>
-                  {state.llmProvider === 'gemini' ? (
-                    <select
-                      value={state.geminiModel}
-                      onChange={(e) => setState(prev => ({ ...prev, geminiModel: e.target.value as GeminiModel }))}
-                      className="flex-1 bg-zinc-950 border border-emerald-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500"
-                    >
-                      {GEMINI_MODELS.map(model => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <select
-                      value={state.openaiModel}
-                      onChange={(e) => setState(prev => ({ ...prev, openaiModel: e.target.value as OpenAIModel }))}
-                      className="flex-1 bg-zinc-950 border border-cyan-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
-                    >
-                      {OPENAI_MODELS.map(model => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    value={state.geminiModel}
+                    onChange={(e) => setState(prev => ({ ...prev, geminiModel: e.target.value as GeminiModel }))}
+                    className="flex-1 bg-zinc-950 border border-emerald-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    {GEMINI_MODELS.map(model => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -818,12 +722,6 @@ export default function App() {
                     className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'gemini' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
                   >
                     Gemini
-                  </button>
-                  <button
-                    onClick={() => setState(prev => ({ ...prev, ttsProvider: 'openai' }))}
-                    className={`flex-1 py-1.5 px-3 rounded text-xs font-medium transition-colors ${state.ttsProvider === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    OpenAI
                   </button>
                   <button
                     onClick={() => setState(prev => ({ ...prev, ttsProvider: 'elevenlabs' }))}
@@ -914,36 +812,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* OpenAI API Key */}
-              <div className="p-3 bg-cyan-500/5 rounded-lg border border-cyan-500/20 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-md">
-                    <Key size={18} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-cyan-300">OpenAI API Key</p>
-                    <p className="text-xs text-zinc-500">For GPT-4o script & TTS</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    placeholder="Enter your OpenAI API Key..."
-                    value={state.openaiApiKey}
-                    onChange={(e) => setState(prev => ({ ...prev, openaiApiKey: e.target.value }))}
-                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-xs focus:outline-none focus:border-cyan-500"
-                  />
-                  {state.openaiApiKey && (
-                    <button
-                      onClick={() => setSaveOpenaiKey(!saveOpenaiKey)}
-                      className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${saveOpenaiKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                      title={saveOpenaiKey ? 'Saved locally' : 'Click to save locally'}
-                    >
-                      <Save size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
+
 
               {/* YouTube OAuth Client ID */}
               <div className="p-3 bg-red-500/5 rounded-lg border border-red-500/20 space-y-3">
@@ -1135,13 +1004,6 @@ export default function App() {
                             Gemini
                           </button>
                           <button
-                            onClick={() => handleUpdateCast(member.name, { voiceType: 'openai' })}
-                            disabled={!state.openaiApiKey}
-                            className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'openai' ? 'bg-cyan-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
-                          >
-                            OpenAI
-                          </button>
-                          <button
                             onClick={() => handleUpdateCast(member.name, { voiceType: 'elevenlabs' })}
                             disabled={state.elevenLabsVoices.length === 0}
                             className={`flex-1 py-1 px-2 rounded text-[10px] font-medium transition-colors ${member.voiceType === 'elevenlabs' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'} disabled:opacity-30`}
@@ -1152,36 +1014,7 @@ export default function App() {
 
                         {/* Voice Dropdown with Preview */}
                         <div className="flex gap-2">
-                          {member.voiceType === 'openai' && state.openaiApiKey ? (
-                            <>
-                              <select
-                                value={member.voice}
-                                onChange={(e) => handleUpdateCast(member.name, { voice: e.target.value })}
-                                className="flex-1 bg-zinc-950 border border-cyan-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
-                              >
-                                {OPENAI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                              </select>
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const base64 = await generateOpenAISpeech("Hello, this is a voice preview.", member.voice, '', state.openaiApiKey);
-                                    const ctx = getAudioContext();
-                                    const buffer = await decodeAudioFile(base64, ctx);
-                                    const source = ctx.createBufferSource();
-                                    source.buffer = buffer;
-                                    source.connect(ctx.destination);
-                                    source.start();
-                                  } catch (e) {
-                                    console.error("Preview failed:", e);
-                                  }
-                                }}
-                                className="px-2 py-1 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded text-xs flex items-center gap-1"
-                                title="Preview voice"
-                              >
-                                <Play size={12} fill="currentColor" />
-                              </button>
-                            </>
-                          ) : member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
+                          {member.voiceType === 'elevenlabs' && state.elevenLabsVoices.length > 0 ? (
                             <>
                               <select
                                 value={member.elevenLabsVoiceId || ''}
@@ -1339,7 +1172,6 @@ export default function App() {
               storyText={state.storyText}
               items={state.items}
               geminiApiKey={state.geminiApiKey}
-              openaiApiKey={state.openaiApiKey}
               podcastInfo={state.podcastInfo}
               onGenerateAllAudio={handleGenerateAllAudio}
               // YouTube props from Config

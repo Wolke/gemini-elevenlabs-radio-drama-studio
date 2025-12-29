@@ -4,10 +4,9 @@ export enum ItemType {
   SFX = 'sfx',
 }
 
-export type LlmProvider = 'gemini' | 'openai';
-export type TtsProvider = 'gemini' | 'openai' | 'elevenlabs';
-export type VoiceType = 'gemini' | 'openai' | 'elevenlabs';
-export type ImageProvider = 'gemini' | 'openai';
+export type TtsProvider = 'gemini' | 'elevenlabs';
+export type VoiceType = 'gemini' | 'elevenlabs';
+export type ImageProvider = 'gemini';
 
 // Available Gemini models for script generation
 export const GEMINI_MODELS = [
@@ -19,15 +18,7 @@ export const GEMINI_MODELS = [
 ] as const;
 export type GeminiModel = typeof GEMINI_MODELS[number];
 
-// Available OpenAI models for script generation
-export const OPENAI_MODELS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'o1',
-  'o1-mini',
-  'o3-mini',
-] as const;
-export type OpenAIModel = typeof OPENAI_MODELS[number];
+
 
 export interface ElevenLabsVoice {
   voice_id: string;
@@ -39,7 +30,7 @@ export interface ElevenLabsVoice {
 
 export interface CastMember {
   name: string;
-  voice: string; // Gemini/OpenAI voice name OR display name
+  voice: string; // Gemini voice name OR display name
   voiceType: VoiceType; // Source of the voice
   elevenLabsVoiceId?: string; // ElevenLabs Voice ID (when voiceType is 'elevenlabs')
   description?: string;
@@ -99,14 +90,10 @@ export interface DramaState {
   elevenLabsApiKey: string;
   useElevenLabsForSpeech: boolean;
 
-  // OpenAI Configuration
-  openaiApiKey: string;
-  llmProvider: LlmProvider;
   ttsProvider: TtsProvider;
 
   // Model selection
   geminiModel: GeminiModel;
-  openaiModel: OpenAIModel;
 
   // ElevenLabs voices cache
   elevenLabsVoices: ElevenLabsVoice[];

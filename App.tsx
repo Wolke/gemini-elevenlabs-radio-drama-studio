@@ -7,7 +7,7 @@ import { generateElevenLabsSfx, generateElevenLabsSpeech, fetchElevenLabsVoices 
 import { decodeRawPCM, decodeAudioFile, getAudioContext, mergeAudioBuffers, bufferToWav, blobToBase64 } from './utils/audioUtils';
 import { ScriptItemCard } from './components/ScriptItemCard';
 import { Player } from './components/Player';
-import { PodcastPublishSection } from './components/PodcastPublishSection';
+import { PodcastPublishSection, PodcastPublishSectionRef } from './components/PodcastPublishSection';
 import {
   initiateYouTubeAuth,
   isYouTubeAuthenticated,
@@ -18,7 +18,8 @@ import {
   YouTubeChannel,
   YouTubePlaylist
 } from './services/youtubeService';
-import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw, Youtube, LogIn, LogOut } from 'lucide-react';
+import { downloadBlob } from './services/podcastService';
+import { Wand2, Play, Square, Settings2, Sparkles, AlertCircle, FileText, Users, Volume2, Loader2, Speaker, ToggleLeft, ToggleRight, Key, Download, Save, FolderOpen, Mic, Mic2, RefreshCw, Youtube, LogIn, LogOut, Film, Rss } from 'lucide-react';
 
 const GEMINI_VOICES = [
   "Zephyr", "Puck", "Charon", "Kore", "Fenrir",
@@ -92,6 +93,7 @@ export default function App() {
 
   const [isConfigExpanded, setIsConfigExpanded] = useState(true);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [isGeneratingAllContent, setIsGeneratingAllContent] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isProjectLoading, setIsProjectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +106,14 @@ export default function App() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
   const [isLoadingYouTube, setIsLoadingYouTube] = useState(false);
 
+  // Podcast generated files state
+  const [mp3Blob, setMp3Blob] = useState<Blob | null>(null);
+  const [webmBlob, setWebmBlob] = useState<Blob | null>(null);
+  const [rssZipBlob, setRssZipBlob] = useState<Blob | null>(null);
+  const [coverArtBase64, setCoverArtBase64] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const podcastPublishRef = useRef<PodcastPublishSectionRef>(null);
 
   // Save/clear API keys individually
   React.useEffect(() => {
@@ -165,7 +174,7 @@ export default function App() {
   // Handle YouTube Login
   const handleYouTubeLogin = async () => {
     if (!youtubeClientId) {
-      alert('請先設定 YouTube OAuth Client ID');
+      alert('Please set YouTube OAuth Client ID first');
       return;
     }
     setIsLoadingYouTube(true);
@@ -183,7 +192,7 @@ export default function App() {
       }
     } catch (e: any) {
       console.error('YouTube login error:', e);
-      alert('YouTube 登入失敗: ' + e.message);
+      alert('YouTube login failed: ' + e.message);
     } finally {
       setIsLoadingYouTube(false);
     }
@@ -502,6 +511,28 @@ export default function App() {
       alert("Export failed.");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  // Download handlers
+  const handleDownloadMp3 = () => {
+    if (mp3Blob) downloadBlob(mp3Blob, 'podcast_episode.mp3');
+  };
+
+  const handleDownloadWebm = () => {
+    if (webmBlob) downloadBlob(webmBlob, 'podcast_video.webm');
+  };
+
+  const handleDownloadRss = () => {
+    if (rssZipBlob) downloadBlob(rssZipBlob, 'podcast_package.zip');
+  };
+
+  const handleDownloadCover = () => {
+    if (coverArtBase64) {
+      const link = document.createElement('a');
+      link.href = `data:image/png;base64,${coverArtBase64}`;
+      link.download = 'podcast_cover.png';
+      link.click();
     }
   };
 
@@ -907,7 +938,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-red-300">YouTube Music Podcast</p>
-                      <p className="text-xs text-zinc-500">直接上傳到 YouTube</p>
+                      <p className="text-xs text-zinc-500">Direct upload to YouTube</p>
                     </div>
                   </div>
                   {isYouTubeLoggedIn ? (
@@ -916,7 +947,7 @@ export default function App() {
                       className="flex items-center gap-1 px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
                     >
                       <LogOut size={12} />
-                      登出
+                      Logout
                     </button>
                   ) : (
                     <button
@@ -925,7 +956,7 @@ export default function App() {
                       className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded text-xs transition-colors disabled:cursor-not-allowed"
                     >
                       {isLoadingYouTube ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />}
-                      登入 YouTube
+                      Login to YouTube
                     </button>
                   )}
                 </div>
@@ -955,27 +986,27 @@ export default function App() {
                   <div className="space-y-2 pt-2 border-t border-red-500/20">
                     {/* Channel Selector */}
                     <div className="space-y-1">
-                      <label className="text-xs text-zinc-400 font-medium">選擇頻道</label>
+                      <label className="text-xs text-zinc-400 font-medium">Select Channel</label>
                       <select
                         value={selectedChannelId}
                         onChange={(e) => setSelectedChannelId(e.target.value)}
                         disabled={isLoadingYouTube}
                         className="w-full bg-zinc-950 border border-red-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-red-500"
                       >
-                        <option value="">選擇頻道...</option>
+                        <option value="">Select Channel...</option>
                         {youtubeChannels.map(channel => (
                           <option key={channel.id} value={channel.id}>
                             {channel.title}
                           </option>
                         ))}
-                        <option value="__manual__">📝 手動輸入頻道 ID...</option>
+                        <option value="__manual__">📝 Enter Channel ID manually...</option>
                       </select>
                       {/* Manual Channel ID Input */}
                       {selectedChannelId === '__manual__' && (
                         <div className="flex gap-1">
                           <input
                             type="text"
-                            placeholder="輸入頻道 ID（例如：UCxxxxxxxxxx）"
+                            placeholder="Enter Channel ID (e.g., UCxxxxxxxxxx)"
                             className="flex-1 bg-zinc-950 border border-red-500/30 rounded px-2 py-1 text-xs focus:outline-none focus:border-red-500"
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
@@ -995,36 +1026,36 @@ export default function App() {
                             }}
                             className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-xs"
                           >
-                            確認
+                            Confirm
                           </button>
                         </div>
                       )}
                       <p className="text-[10px] text-zinc-600">
-                        品牌帳戶的頻道可在 YouTube Studio → 設定 → 頻道 → 頻道網址 中找到 ID
+                        Brand account channel ID can be found in YouTube Studio → Settings → Channel → Channel URL
                       </p>
                     </div>
 
                     {/* Playlist Selector */}
                     {selectedChannelId && selectedChannelId !== '__manual__' && (
                       <div className="space-y-1">
-                        <label className="text-xs text-zinc-400 font-medium">上傳到播放清單 (Podcast)</label>
+                        <label className="text-xs text-zinc-400 font-medium">Upload to Playlist (Podcast)</label>
                         <select
                           value={selectedPlaylistId}
                           onChange={(e) => setSelectedPlaylistId(e.target.value)}
                           disabled={isLoadingYouTube}
                           className="w-full bg-zinc-950 border border-red-500/30 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-red-500"
                         >
-                          <option value="">不加入播放清單</option>
+                          <option value="">Don't add to playlist</option>
                           {youtubePlaylists.map(playlist => (
                             <option key={playlist.id} value={playlist.id}>
-                              {playlist.title} ({playlist.itemCount} 個影片)
+                              {playlist.title} ({playlist.itemCount} videos)
                             </option>
                           ))}
                         </select>
                         {isLoadingYouTube && (
                           <div className="flex items-center gap-2 text-xs text-zinc-500">
                             <Loader2 size={12} className="animate-spin" />
-                            載入中...
+                            Loading...
                           </div>
                         )}
                       </div>
@@ -1032,7 +1063,7 @@ export default function App() {
 
                     {youtubeChannels.length > 0 && (
                       <p className="text-[10px] text-green-500">
-                        ✓ 已連接 {youtubeChannels.length} 個頻道
+                        ✓ {youtubeChannels.length} channel(s) connected
                       </p>
                     )}
                   </div>
@@ -1040,7 +1071,7 @@ export default function App() {
 
                 {!isYouTubeLoggedIn && (
                   <p className="text-[10px] text-zinc-600">
-                    從 Google Cloud Console 取得 OAuth 2.0 Client ID（Web 應用程式類型）
+                    Get OAuth 2.0 Client ID from Google Cloud Console (Web Application type)
                   </p>
                 )}
               </div>
@@ -1234,6 +1265,18 @@ export default function App() {
                   {isGeneratingAll ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
                   Generate All Audio
                 </button>
+                <button
+                  onClick={() => podcastPublishRef.current?.handleGenerateAll()}
+                  disabled={isGeneratingAllContent}
+                  className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-md text-xs font-medium transition-colors flex items-center gap-2 text-white ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isGeneratingAllContent ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={14} />
+                  )}
+                  Generate All
+                </button>
               </div>
 
               <div className="space-y-4">
@@ -1287,6 +1330,12 @@ export default function App() {
               isYouTubeLoggedIn={isYouTubeLoggedIn}
               selectedPlaylistId={selectedPlaylistId}
               youtubePlaylists={youtubePlaylists}
+              onGeneratingChange={setIsGeneratingAllContent}
+              mp3Blob={mp3Blob} setMp3Blob={setMp3Blob}
+              webmBlob={webmBlob} setWebmBlob={setWebmBlob}
+              rssZipBlob={rssZipBlob} setRssZipBlob={setRssZipBlob}
+              coverArtBase64={coverArtBase64} setCoverArtBase64={setCoverArtBase64}
+              ref={podcastPublishRef}
             />
           </div>
         )
@@ -1326,6 +1375,48 @@ export default function App() {
                 {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                 Export WAV
               </button>
+
+              <div className="h-8 w-px bg-zinc-700 mx-2"></div>
+
+              {/* Download Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDownloadMp3}
+                  disabled={!mp3Blob}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed border border-zinc-700"
+                  title="Download MP3"
+                >
+                  <Download size={16} className="text-orange-400" />
+                  <span className="hidden sm:inline">MP3</span>
+                </button>
+                <button
+                  onClick={handleDownloadWebm}
+                  disabled={!webmBlob}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed border border-zinc-700"
+                  title="Download WebM"
+                >
+                  <Film size={16} className="text-red-400" />
+                  <span className="hidden sm:inline">WebM</span>
+                </button>
+                <button
+                  onClick={handleDownloadRss}
+                  disabled={!rssZipBlob}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed border border-zinc-700"
+                  title="Download RSS Package"
+                >
+                  <Download size={16} className="text-amber-400" />
+                  <span className="hidden sm:inline">RSS</span>
+                </button>
+                <button
+                  onClick={handleDownloadCover}
+                  disabled={!coverArtBase64}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed border border-zinc-700"
+                  title="Download Cover Art"
+                >
+                  <Download size={16} className="text-purple-400" />
+                  <span className="hidden sm:inline">Cover</span>
+                </button>
+              </div>
 
             </div>
           </div>

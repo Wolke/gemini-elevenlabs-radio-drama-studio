@@ -3,7 +3,7 @@
  * One-click podcast generation and export
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Loader2, Image, Rss, Sparkles, Radio, FileAudio, Wand2, Download, Check, AlertCircle, Film, Save, RefreshCw, Upload, Youtube, ExternalLink } from 'lucide-react';
 import { generatePodcastCoverArt, createPodcastZip, downloadBlob, PodcastMetadata, EpisodeMetadata } from '../services/podcastService';
 import { generateOpenAICoverArt } from '../services/openaiService';
@@ -25,10 +25,25 @@ interface PodcastPublishSectionProps {
     openaiApiKey: string;
     podcastInfo: GeneratedPodcastInfo | null;
     onGenerateAllAudio?: () => Promise<AudioBuffer[]>;
+    onGeneratingChange?: (isGenerating: boolean) => void;
+    // Download state props
+    mp3Blob: Blob | null;
+    setMp3Blob: (blob: Blob | null) => void;
+    webmBlob: Blob | null;
+    setWebmBlob: (blob: Blob | null) => void;
+    rssZipBlob: Blob | null;
+    setRssZipBlob: (blob: Blob | null) => void;
+    coverArtBase64: string | null;
+    setCoverArtBase64: (base64: string | null) => void;
     // YouTube props from Config
     isYouTubeLoggedIn: boolean;
     selectedPlaylistId: string;
     youtubePlaylists: YouTubePlaylist[];
+}
+
+export interface PodcastPublishSectionRef {
+    handleGenerateAll: () => Promise<void>;
+    isGenerating: boolean;
 }
 
 // Generation step status
@@ -41,7 +56,7 @@ interface GenerationStep {
     error?: string;
 }
 
-export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
+export const PodcastPublishSection = forwardRef<PodcastPublishSectionRef, PodcastPublishSectionProps>(({
     storyText,
     items,
     geminiApiKey,
@@ -50,12 +65,27 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     onGenerateAllAudio,
     // YouTube props from Config
     isYouTubeLoggedIn,
+    onGeneratingChange,
     selectedPlaylistId,
-    youtubePlaylists
-}) => {
+    youtubePlaylists,
+    // Download state props
+    mp3Blob, setMp3Blob,
+    webmBlob, setWebmBlob,
+    rssZipBlob, setRssZipBlob,
+    coverArtBase64, setCoverArtBase64
+}, ref) => {
     // Cover art state
-    const [coverArtBase64, setCoverArtBase64] = useState<string | null>(null);
+    // removed local coverArtBase64 state
     const [imageProvider, setImageProvider] = useState<ImageProvider>('gemini');
+
+    // Generation state
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [steps, setSteps] = useState<GenerationStep[]>([]);
+
+    // Sync generation state with parent
+    useEffect(() => {
+        onGeneratingChange?.(isGenerating);
+    }, [isGenerating, onGeneratingChange]);
 
     // Podcast metadata - load title/author from localStorage
     const [podcastTitle, setPodcastTitle] = useState(() => localStorage.getItem('podcastTitle') || '');
@@ -66,19 +96,13 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     const [isSaved, setIsSaved] = useState(false);
 
     // Generated outputs
-    const [mp3Blob, setMp3Blob] = useState<Blob | null>(null);
-    const [webmBlob, setWebmBlob] = useState<Blob | null>(null);
-    const [rssZipBlob, setRssZipBlob] = useState<Blob | null>(null);
+    // removed local blobs state
 
     // YouTube upload state (only upload-related, login/channel/playlist comes from props)
     const [isUploadingToYouTube, setIsUploadingToYouTube] = useState(false);
     const [youtubeUploadProgress, setYoutubeUploadProgress] = useState<YouTubeUploadProgress | null>(null);
     const [youtubeUploadResult, setYoutubeUploadResult] = useState<YouTubeUploadResult | null>(null);
     const [youtubeUploadError, setYoutubeUploadError] = useState<string | null>(null);
-
-    // Generation state
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [steps, setSteps] = useState<GenerationStep[]>([]);
 
     // Auto-fill from podcastInfo (only episodeTitle, description, coverPrompt - NOT title/author)
     useEffect(() => {
@@ -88,7 +112,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             setPodcastDescription(podcastInfo.description || '');
             setCoverPrompt(podcastInfo.coverPrompt || '');
         }
-    }, [podcastInfo]);
+    }, [podcastInfo, setEpisodeTitle, setPodcastDescription, setCoverPrompt]);
 
     // Save podcast title/author to localStorage
     const handleSavePodcastInfo = () => {
@@ -114,7 +138,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     // === GENERATE ALL ===
     const handleGenerateAll = async () => {
         if (!podcastTitle || !podcastAuthor) {
-            alert('請填寫 Podcast 名稱和作者');
+            alert('Please enter Podcast title and author');
             return;
         }
 
@@ -122,13 +146,14 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
         setMp3Blob(null);
         setWebmBlob(null);
         setRssZipBlob(null);
+        setCoverArtBase64(null); // Clear cover art on new generation
 
         const initialSteps: GenerationStep[] = [
-            { id: 'audio', label: '生成音訊', status: allAudioGenerated ? 'done' : 'pending' },
-            { id: 'cover', label: '生成封面圖', status: coverArtBase64 ? 'done' : 'pending' },
-            { id: 'mp3', label: '合成 MP3', status: 'pending' },
-            { id: 'webm', label: '合成 WebM 影片', status: 'pending' },
-            { id: 'rss', label: '打包 RSS + MP3', status: 'pending' },
+            { id: 'audio', label: 'Generate Audio', status: allAudioGenerated ? 'done' : 'pending' },
+            { id: 'cover', label: 'Generate Cover', status: coverArtBase64 ? 'done' : 'pending' },
+            { id: 'mp3', label: 'Create MP3', status: 'pending' },
+            { id: 'webm', label: 'Create WebM Video', status: 'pending' },
+            { id: 'rss', label: 'Package RSS + MP3', status: 'pending' },
         ];
         setSteps(initialSteps);
 
@@ -148,8 +173,8 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
 
             // If still no buffers after generation, throw error
             if (buffers.length === 0) {
-                updateStep('audio', 'error', '沒有可用的音訊');
-                throw new Error('沒有可用的音訊。請先個別生成音訊後再試。');
+                updateStep('audio', 'error', 'No audio available');
+                throw new Error('No audio available. Please generate audio individually first.');
             }
 
             const mergedBuffer = await mergeAudioBuffers(buffers);
@@ -203,7 +228,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                     updateStep('webm', 'error', e.message);
                 }
             } else {
-                updateStep('webm', 'error', '需要封面圖');
+                updateStep('webm', 'error', 'Cover art required');
             }
 
             // Step 5: Create RSS ZIP package
@@ -245,15 +270,20 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
         }
     };
 
+    useImperativeHandle(ref, () => ({
+        handleGenerateAll,
+        isGenerating
+    }));
+
     // Regenerate Cover Art
     const [isRegeneratingCover, setIsRegeneratingCover] = useState(false);
     const handleRegenerateCover = async () => {
         if (!coverPrompt && !storyText) {
-            alert('需要故事內容或提示詞才能生成封面');
+            alert('Story content or prompt required to generate cover');
             return;
         }
         if (!hasAnyImageKey) {
-            alert('需要設定 Gemini 或 OpenAI API Key');
+            alert('Gemini or OpenAI API Key required');
             return;
         }
 
@@ -277,7 +307,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             setCoverArtBase64(cover);
         } catch (e: any) {
             console.error('Cover regeneration error:', e);
-            alert('封面圖生成失敗: ' + e.message);
+            alert('Cover generation failed: ' + e.message);
         } finally {
             setIsRegeneratingCover(false);
         }
@@ -290,7 +320,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             .map(i => i.audioBuffer)
             .filter((b): b is AudioBuffer => !!b);
         if (buffers.length === 0) {
-            alert('沒有可用的音訊');
+            alert('No audio available');
             return;
         }
         setIsRegeneratingMp3(true);
@@ -300,7 +330,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             setMp3Blob(mp3);
         } catch (e: any) {
             console.error('MP3 regeneration error:', e);
-            alert('MP3 合成失敗: ' + e.message);
+            alert('MP3 conversion failed: ' + e.message);
         } finally {
             setIsRegeneratingMp3(false);
         }
@@ -313,11 +343,11 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             .map(i => i.audioBuffer)
             .filter((b): b is AudioBuffer => !!b);
         if (buffers.length === 0) {
-            alert('沒有可用的音訊');
+            alert('No audio available');
             return;
         }
         if (!coverArtBase64) {
-            alert('需要封面圖才能生成影片');
+            alert('Cover art required to generate video');
             return;
         }
         setIsRegeneratingWebm(true);
@@ -328,7 +358,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             setWebmBlob(webm);
         } catch (e: any) {
             console.error('WebM regeneration error:', e);
-            alert('WebM 合成失敗: ' + e.message);
+            alert('WebM conversion failed: ' + e.message);
         } finally {
             setIsRegeneratingWebm(false);
         }
@@ -351,13 +381,13 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
     // Handle Upload to YouTube
     const handleUploadToYouTube = async () => {
         if (!webmBlob) {
-            alert('請先生成 WebM 影片');
+            alert('Please generate WebM video first');
             return;
         }
 
         const token = getYouTubeAccessToken();
         if (!token) {
-            alert('請先登入 YouTube');
+            alert('Please login to YouTube first');
             return;
         }
 
@@ -370,7 +400,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
             const result = await uploadToYouTube(
                 webmBlob,
                 {
-                    title: episodeTitle || `${podcastTitle} - 新集數`,
+                    title: episodeTitle || `${podcastTitle} - New Episode`,
                     description: `${podcastDescription || storyText.slice(0, 500)}\n\n${podcastInfo?.tags?.map(t => `#${t}`).join(' ') || ''}`,
                     tags: podcastInfo?.tags || [podcastTitle],
                     categoryId: '22', // People & Blogs (good for podcasts)
@@ -422,10 +452,10 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                     </div>
                     <div>
                         <h3 className="text-lg font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-                            Podcast 發布區
+                            Podcast Publish
                         </h3>
                         <p className="text-xs text-zinc-500">
-                            一鍵生成所有內容並匯出
+                            One-click generate and export all content
                         </p>
                     </div>
                 </div>
@@ -434,7 +464,7 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                 <div className="flex items-center gap-2 text-sm">
                     <FileAudio size={16} className="text-zinc-500" />
                     <span className="text-zinc-400">
-                        {items.filter(i => i.audioBuffer).length}/{items.length} 音訊
+                        {items.filter(i => i.audioBuffer).length}/{items.length} audio
                     </span>
                     {totalDuration > 0 && (
                         <span className="text-zinc-500">
@@ -449,51 +479,51 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                 {/* Podcast Name + Author + Save Button - First Row */}
                 <div className="space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
-                        Podcast 名稱 *
+                        Podcast Title *
                     </label>
                     <input
                         type="text"
                         value={podcastTitle}
                         onChange={(e) => setPodcastTitle(e.target.value)}
-                        placeholder="例：深夜廣播劇場"
+                        placeholder="e.g., Late Night Radio Drama"
                         className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
                     />
                 </div>
                 <div className="space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
-                        作者 *
+                        Author *
                         <button
                             onClick={handleSavePodcastInfo}
                             className="ml-auto flex items-center gap-1 px-2 py-0.5 text-xs bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
-                            title="儲存 Podcast 資訊"
+                            title="Save Podcast Info"
                         >
                             {isSaved ? <Check size={12} className="text-green-400" /> : <Save size={12} />}
-                            {isSaved ? '已儲存' : '儲存'}
+                            {isSaved ? 'Saved' : 'Save'}
                         </button>
                     </label>
                     <input
                         type="text"
                         value={podcastAuthor}
                         onChange={(e) => setPodcastAuthor(e.target.value)}
-                        placeholder="例：聲優工作室"
+                        placeholder="e.g., Voice Studio"
                         className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
                     />
                 </div>
                 <div className="space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
-                        本集標題
+                        Episode Title
                         {podcastInfo?.episodeTitle && <Wand2 size={10} className="text-purple-400" />}
                     </label>
                     <input
                         type="text"
                         value={episodeTitle}
                         onChange={(e) => setEpisodeTitle(e.target.value)}
-                        placeholder="例：第一集：故事開始"
+                        placeholder="e.g., Episode 1: The Beginning"
                         className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
                     />
                 </div>
                 <div className="space-y-1">
-                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">封面圖生成</label>
+                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cover Art Generator</label>
                     <div className="flex gap-1 bg-black/40 border border-zinc-700 rounded-lg p-1">
                         <button
                             onClick={() => setImageProvider('gemini')}
@@ -513,25 +543,25 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                 </div>
                 <div className="col-span-2 space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
-                        Podcast 描述
+                        Podcast Description
                         {podcastInfo?.description && <Wand2 size={10} className="text-purple-400" />}
                     </label>
                     <textarea
                         value={podcastDescription}
                         onChange={(e) => setPodcastDescription(e.target.value)}
-                        placeholder="簡短描述你的 Podcast 內容..."
+                        placeholder="Brief description of your podcast content..."
                         className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500 resize-none h-16"
                     />
                 </div>
                 <div className="col-span-2 space-y-1">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
-                        封面圖提示詞
+                        Cover Art Prompt
                         {podcastInfo?.coverPrompt && <Wand2 size={10} className="text-purple-400" />}
                     </label>
                     <textarea
                         value={coverPrompt}
                         onChange={(e) => setCoverPrompt(e.target.value)}
-                        placeholder="描述封面圖的風格和內容，例：一個復古風格的收音機在深夜發光..."
+                        placeholder="Describe the style and content of the cover, e.g., A retro-style radio glowing in the night..."
                         className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500 resize-none h-16"
                     />
                 </div>
@@ -552,214 +582,163 @@ export const PodcastPublishSection: React.FC<PodcastPublishSectionProps> = ({
                             <Image size={32} className="text-zinc-600" />
                         )}
                     </div>
-                    <span className="text-xs text-zinc-500">封面預覽</span>
+                    <span className="text-xs text-zinc-500">Cover Preview</span>
                 </div>
 
                 {/* Generate All Button */}
-                <div className="col-span-2 flex flex-col justify-center">
-                    <button
-                        onClick={handleGenerateAll}
-                        disabled={isGenerating || !podcastTitle || !podcastAuthor || items.length === 0}
-                        className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-                    >
-                        {isGenerating ? (
-                            <>
-                                <Loader2 size={24} className="animate-spin" />
-                                生成中...
-                            </>
-                        ) : (
-                            <>
-                                <Sparkles size={24} />
-                                一鍵生成全部
-                            </>
-                        )}
-                    </button>
-                    <p className="text-xs text-zinc-500 text-center mt-2">
-                        音訊 → 封面圖 → MP3 → MP4 影片 → RSS 打包
-                    </p>
+                <div className="col-span-2 flex items-center justify-center text-xs text-zinc-500 text-center">
+                    Audio → Cover Art → MP3 → WebM Video → RSS Package
                 </div>
             </div>
 
+
             {/* Generation Progress */}
-            {steps.length > 0 && (
-                <div className="bg-black/30 rounded-lg p-4 space-y-2">
-                    <div className="text-sm font-semibold text-zinc-300 mb-3">生成進度</div>
-                    <div className="grid grid-cols-5 gap-2">
-                        {steps.map(step => (
-                            <div key={step.id} className="flex flex-col items-center gap-1">
-                                <StepIcon status={step.status} />
-                                <span className={`text-xs ${step.status === 'done' ? 'text-green-400' : step.status === 'error' ? 'text-red-400' : 'text-zinc-500'}`}>
-                                    {step.label}
-                                </span>
-                            </div>
-                        ))}
+            {
+                steps.length > 0 && (
+                    <div className="bg-black/30 rounded-lg p-4 space-y-2">
+                        <div className="text-sm font-semibold text-zinc-300 mb-3">Generation Progress</div>
+                        <div className="grid grid-cols-5 gap-2">
+                            {steps.map(step => (
+                                <div key={step.id} className="flex flex-col items-center gap-1">
+                                    <StepIcon status={step.status} />
+                                    <span className={`text-xs ${step.status === 'done' ? 'text-green-400' : step.status === 'error' ? 'text-red-400' : 'text-zinc-500'}`}>
+                                        {step.label}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Regenerate Buttons - show when audio exists */}
-            {hasAudio && (
-                <div className="flex gap-3">
-                    <button
-                        onClick={handleRegenerateCover}
-                        disabled={isRegeneratingCover || isGenerating}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg text-sm text-purple-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isRegeneratingCover ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        重新生成封面
-                    </button>
-                    <button
-                        onClick={handleRegenerateMp3}
-                        disabled={isRegeneratingMp3 || isGenerating}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/30 rounded-lg text-sm text-orange-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isRegeneratingMp3 ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        重新合成 MP3
-                    </button>
-                    <button
-                        onClick={handleRegenerateWebm}
-                        disabled={isRegeneratingWebm || isGenerating || !coverArtBase64}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded-lg text-sm text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isRegeneratingWebm ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        重新合成 WebM
-                    </button>
-                </div>
-            )}
-
-            {/* Download Buttons */}
-            {(mp3Blob || webmBlob || rssZipBlob || coverArtBase64) && (
-                <div className="bg-black/30 rounded-lg p-4">
-                    <div className="text-sm font-semibold text-zinc-300 mb-3">下載檔案</div>
-                    <div className="grid grid-cols-4 gap-3">
+            {
+                hasAudio && (
+                    <div className="flex gap-3">
                         <button
-                            onClick={handleDownloadMp3}
-                            disabled={!mp3Blob}
-                            className="flex flex-col items-center gap-2 p-3 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            onClick={handleRegenerateCover}
+                            disabled={isRegeneratingCover || isGenerating}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg text-sm text-purple-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Download size={20} className="text-orange-400" />
-                            <span className="text-xs text-zinc-300">MP3 音訊</span>
+                            {isRegeneratingCover ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            Regenerate Cover
                         </button>
                         <button
-                            onClick={handleDownloadWebm}
-                            disabled={!webmBlob}
-                            className="flex flex-col items-center gap-2 p-3 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            onClick={handleRegenerateMp3}
+                            disabled={isRegeneratingMp3 || isGenerating}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/30 rounded-lg text-sm text-orange-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Film size={20} className="text-red-400" />
-                            <span className="text-xs text-zinc-300">WebM 影片</span>
+                            {isRegeneratingMp3 ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            Regenerate MP3
                         </button>
                         <button
-                            onClick={handleDownloadRss}
-                            disabled={!rssZipBlob}
-                            className="flex flex-col items-center gap-2 p-3 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            onClick={handleRegenerateWebm}
+                            disabled={isRegeneratingWebm || isGenerating || !coverArtBase64}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded-lg text-sm text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Download size={20} className="text-amber-400" />
-                            <span className="text-xs text-zinc-300">RSS 包</span>
-                        </button>
-                        <button
-                            onClick={handleDownloadCover}
-                            disabled={!coverArtBase64}
-                            className="flex flex-col items-center gap-2 p-3 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                            <Download size={20} className="text-purple-400" />
-                            <span className="text-xs text-zinc-300">封面圖</span>
+                            {isRegeneratingWebm ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            Regenerate WebM
                         </button>
                     </div>
-                </div>
-            )}
+                )
+            }
+
+            {/* Download Buttons Section REMOVED */}
 
             {/* YouTube Upload Section */}
-            {isYouTubeLoggedIn && (
-                <div className="bg-gradient-to-br from-red-900/20 to-red-800/10 border border-red-500/30 rounded-lg p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                        <Youtube size={20} className="text-red-500" />
-                        <span className="font-semibold text-red-300">上傳到 YouTube</span>
-                        {selectedPlaylistId && youtubePlaylists.find(p => p.id === selectedPlaylistId) && (
-                            <span className="text-xs text-zinc-400">
-                                → {youtubePlaylists.find(p => p.id === selectedPlaylistId)?.title}
-                            </span>
-                        )}
-                    </div>
-
-                    <button
-                        onClick={handleUploadToYouTube}
-                        disabled={!webmBlob || isUploadingToYouTube}
-                        className="w-full flex items-center justify-center gap-2 py-3 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded-lg font-medium transition-colors disabled:cursor-not-allowed"
-                    >
-                        {isUploadingToYouTube ? (
-                            <>
-                                <Loader2 size={18} className="animate-spin" />
-                                上傳中...
-                                {youtubeUploadProgress && (
-                                    <span className="ml-2">
-                                        {youtubeUploadProgress.percentage}%
-                                    </span>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <Upload size={18} />
-                                上傳到 YouTube
-                            </>
-                        )}
-                    </button>
-
-                    {youtubeUploadProgress && (
-                        <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
-                            <div
-                                className="bg-red-500 h-full transition-all duration-300"
-                                style={{ width: `${youtubeUploadProgress.percentage}%` }}
-                            />
+            {
+                isYouTubeLoggedIn && (
+                    <div className="bg-gradient-to-br from-red-900/20 to-red-800/10 border border-red-500/30 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                            <Youtube size={20} className="text-red-500" />
+                            <span className="font-semibold text-red-300">Upload to YouTube</span>
+                            {selectedPlaylistId && youtubePlaylists.find(p => p.id === selectedPlaylistId) && (
+                                <span className="text-xs text-zinc-400">
+                                    → {youtubePlaylists.find(p => p.id === selectedPlaylistId)?.title}
+                                </span>
+                            )}
                         </div>
-                    )}
 
-                    {youtubeUploadResult && (
-                        <div className="flex items-center justify-between bg-green-900/30 border border-green-500/30 rounded-lg p-3">
-                            <div className="flex items-center gap-2">
-                                <Check size={16} className="text-green-400" />
-                                <span className="text-sm text-green-300">上傳成功！</span>
+                        <button
+                            onClick={handleUploadToYouTube}
+                            disabled={!webmBlob || isUploadingToYouTube}
+                            className="w-full flex items-center justify-center gap-2 py-3 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 text-white rounded-lg font-medium transition-colors disabled:cursor-not-allowed"
+                        >
+                            {isUploadingToYouTube ? (
+                                <>
+                                    <Loader2 size={18} className="animate-spin" />
+                                    Uploading...
+                                    {youtubeUploadProgress && (
+                                        <span className="ml-2">
+                                            {youtubeUploadProgress.percentage}%
+                                        </span>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <Upload size={18} />
+                                    Upload to YouTube
+                                </>
+                            )}
+                        </button>
+
+                        {youtubeUploadProgress && (
+                            <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
+                                <div
+                                    className="bg-red-500 h-full transition-all duration-300"
+                                    style={{ width: `${youtubeUploadProgress.percentage}%` }}
+                                />
                             </div>
-                            <a
-                                href={youtubeUploadResult.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-sm transition-colors"
-                            >
-                                <ExternalLink size={14} />
-                                開啟影片
-                            </a>
-                        </div>
-                    )}
+                        )}
 
-                    {youtubeUploadError && (
-                        <div className="flex items-center gap-2 bg-red-900/30 border border-red-500/30 rounded-lg p-3">
-                            <AlertCircle size={16} className="text-red-400" />
-                            <span className="text-sm text-red-300">{youtubeUploadError}</span>
-                        </div>
-                    )}
+                        {youtubeUploadResult && (
+                            <div className="flex items-center justify-between bg-green-900/30 border border-green-500/30 rounded-lg p-3">
+                                <div className="flex items-center gap-2">
+                                    <Check size={16} className="text-green-400" />
+                                    <span className="text-sm text-green-300">Upload successful!</span>
+                                </div>
+                                <a
+                                    href={youtubeUploadResult.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-sm transition-colors"
+                                >
+                                    <ExternalLink size={14} />
+                                    Open Video
+                                </a>
+                            </div>
+                        )}
 
-                    {!webmBlob && (
-                        <p className="text-xs text-zinc-500 text-center">
-                            請先生成 WebM 影片才能上傳
+                        {youtubeUploadError && (
+                            <div className="flex items-center gap-2 bg-red-900/30 border border-red-500/30 rounded-lg p-3">
+                                <AlertCircle size={16} className="text-red-400" />
+                                <span className="text-sm text-red-300">{youtubeUploadError}</span>
+                            </div>
+                        )}
+
+                        {!webmBlob && (
+                            <p className="text-xs text-zinc-500 text-center">
+                                Please generate WebM video first before uploading
+                            </p>
+                        )}
+
+                        <p className="text-xs text-zinc-500">
+                            Video will be uploaded as "Private". You can change privacy settings in YouTube Studio
                         </p>
-                    )}
-
-                    <p className="text-xs text-zinc-500">
-                        影片將以「私人」模式上傳，您可在 YouTube Studio 中修改隱私設定
-                    </p>
-                </div>
-            )}
+                    </div>
+                )
+            }
 
             {/* Platform Info */}
             <div className="bg-black/20 rounded-lg p-3 border border-zinc-800">
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
                     <Rss size={14} />
-                    <span>支援平台：YouTube Music (MP4)、Spotify、Apple Podcasts、Podbean (RSS+MP3)</span>
+                    <span>Supported platforms: YouTube Music (MP4), Spotify, Apple Podcasts, Podbean (RSS+MP3)</span>
                 </div>
             </div>
-        </section>
+        </section >
     );
-};
+});
 
 // Helper function
 function base64ToBlob(base64: string, mimeType: string): Blob {
